@@ -20,14 +20,17 @@ reminder at merge time is a detour. These are not reminders.
 
 ## Install
 
-Inside this repository the plugin is enabled through the `sanfrancisco`
-directory marketplace in `.claude/settings.json`. The public marketplace at
-`loopable-ai/claude-plugins` is the next story (S2.7):
-
 ```bash
 claude plugin marketplace add loopable-ai/claude-plugins
 claude plugin install loopable@loopable-ai
 ```
+
+The plugin registers the MCP server too (`.mcp.json` runs `@loopable/mcp`
+from npm), so one install gives a session both the tools and the hooks. This
+repository installs it the same way — `.claude/settings.json` names the
+`loopable-ai` marketplace — and develops it here: the public repository is a
+release mirror, published by `.github/workflows/loopable-plugin-release.yml`
+on a `loopable-plugin-v<version>` tag whose version matches the manifest.
 
 The token is read from `~/.config/loopable/token` (or `LOOPABLE_TOKEN`, or
 `LOOPABLE_TOKEN_FILE`) — the same file the MCP server reads. Nothing in the

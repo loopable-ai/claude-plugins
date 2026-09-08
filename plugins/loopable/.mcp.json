@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "loopable": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@loopable/mcp@latest"
+      ],
+      "env": {
+        "LOOPABLE_API_URL": "https://api.loopable.ai"
+      }
+    }
+  }
+}

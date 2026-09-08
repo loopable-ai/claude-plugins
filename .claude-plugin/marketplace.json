@@ -13,7 +13,7 @@
       "name": "loopable",
       "source": "./plugins/loopable",
       "description": "The Loopable backlog, wired into how a repository is worked: in-progress items at session start, no edits on main, no merge without naming the item",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "productivity"
     }
   ]

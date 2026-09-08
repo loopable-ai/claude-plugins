@@ -1,6 +1,6 @@
 {
   "name": "loopable",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Loopable backlog, wired into how a repository is worked: what is in progress arrives at session start, an edit on main is refused, and tracked work cannot be merged without naming its item.",
   "keywords": [
     "loopable",
