@@ -1,0 +1,20 @@
+{
+  "name": "loopable-ai",
+  "owner": {
+    "name": "Loopable",
+    "url": "https://github.com/loopable-ai"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for Loopable, the AI product owner for software studios and their clients",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "loopable",
+      "source": "./plugins/loopable",
+      "description": "The Loopable backlog, wired into how a repository is worked: in-progress items at session start, no edits on main, no merge without naming the item",
+      "version": "0.2.0",
+      "category": "productivity"
+    }
+  ]
+}
