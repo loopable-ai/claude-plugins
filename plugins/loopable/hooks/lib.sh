@@ -23,7 +23,18 @@ loopable_token() {
 loopable_get() { # loopable_get <path> -> body on stdout, non-zero if unreachable
   local token; token=$(loopable_token) || return 1
   [ -n "$token" ] || return 1
-  curl -fsS --max-time 4 -H "Authorization: Bearer $token" "$LOOPABLE_API$1"
+  curl -fsS --max-time 4 -H "Authorization: Bearer $token" "$LOOPABLE_API$1" 2>/dev/null
+}
+
+# The write half. Same discipline, same silence: curl's own diagnostics go to
+# /dev/null because a hook that prints to stderr has printed into somebody's
+# session, and "the backlog was asleep" is not news a session needs.
+loopable_post() { # loopable_post <path> <json body> -> body on stdout, non-zero
+  local token; token=$(loopable_token) || return 1
+  [ -n "$token" ] || return 1
+  curl -fsS --max-time 4 -X POST \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    --data-binary "$2" "$LOOPABLE_API$1" 2>/dev/null
 }
 
 # ---------------------------------------------------------- the config file --
@@ -126,4 +137,157 @@ loopable_safe() { # loopable_safe <text> -> one printable line, at most 80 chars
     if (length($0) > 80) $0 = substr($0, 1, 77) "…"
     printf "%s", $0
   }' RS='\0'
+}
+
+# ------------------------------------------------------- the session hooks --
+#
+# S2.2. Three hooks report a session into the backlog while it runs, and every
+# one of them has to answer the same two questions first: WHICH ITEM is this
+# branch, and WHERE do I keep what I learned. Both live here, because a hook
+# that resolved them its own way would be a second answer, and the pair would
+# drift the way the sanitizer pair did.
+
+# WHERE THE STATE LIVES: inside the git directory, never the working tree.
+#
+# `.loopable-item` in the worktree root was the obvious place and is the wrong
+# one. The plugin cannot edit somebody's `.gitignore` — it is their file, in
+# their repository, and a plugin that writes to it has done something the
+# person did not ask for — and `.git/info/exclude` only works for a repository
+# that has one, which is a second thing to get right. A file under the git
+# directory cannot be committed at all: there is no rule to add and no rule
+# that can be removed. It is per-worktree too — `--absolute-git-dir` in a
+# linked worktree is `.git/worktrees/<name>` — which is exactly the scope
+# these files want, since the item IS the branch.
+loopable_state_dir() { # -> a directory, created, or non-zero
+  local d r
+  r=$(loopable_repo) || return 1
+  [ -n "$r" ] || return 1
+  d=$(git -C "$r" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  [ -n "$d" ] || return 1
+  mkdir -p "$d/loopable" 2>/dev/null || return 1
+  printf '%s' "$d/loopable"
+}
+loopable_state() { # loopable_state <name> -> its contents, or non-zero
+  local d; d=$(loopable_state_dir) || return 1
+  [ -r "$d/$1" ] || return 1
+  cat "$d/$1"
+}
+loopable_state_put() { # loopable_state_put <name> <value>
+  local d; d=$(loopable_state_dir) || return 1
+  printf '%s' "$2" > "$d/$1" 2>/dev/null
+}
+
+# The branch this session is on, or nothing on main and nothing detached.
+# Main is where dispatching happens (guard-main.sh refuses the edits), so a
+# session there is not working an item and has no session to open.
+loopable_branch() {
+  local r b; r=$(loopable_repo) || return 1
+  b=$(git -C "$r" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 1
+  case "$b" in main|master|'') return 1 ;; esac
+  printf '%s' "$b"
+}
+
+# The project this repository belongs to: the config, or the single project
+# the token can see. Two projects and no config is an ambiguity, and a hook
+# guesses at nothing.
+loopable_project() {
+  local p me
+  p=$(loopable_config project) && [ -n "$p" ] && { printf '%s' "$p"; return; }
+  me=$(loopable_get /agent/whoami) || return 1
+  p=$(printf '%s' "$me" | jq -r '.projects | if length == 1 then .[0].id else empty end') || return 1
+  [ -n "$p" ] || return 1
+  printf '%s' "$p"
+}
+
+# A title, or a branch name, as comparable words.
+loopable_slug() {
+  printf '%s' "$1" | tr 'A-Z' 'a-z' |
+    sed -E 's|[^a-z0-9]+|-|g; s|^-+||; s|-+$||'
+}
+
+# WHICH ITEM IS THIS BRANCH? Four answers, cheapest and most explicit first.
+#
+#   1. LOOPABLE_ITEM         somebody said so; nothing outranks that
+#   2. the state file        this session already worked it out
+#   3. the branch's short id  `<kind>/<slug>-<shortid>`, which is how
+#                             /loopable:start (S2.4) will name branches
+#   4. the one in_progress item whose title matches the branch slug — the
+#      answer for the branches that exist today, `<type>/<app>-<slug>`
+#
+# NOTHING RESOLVES, NOTHING HAPPENS. An item guessed wrong is worse than no
+# item: it writes one person's work into another person's session. So a tie
+# at step 4 resolves to nothing, deliberately.
+loopable_item() { # -> a work item id, or non-zero
+  local branch slug short items id
+  [ -n "${LOOPABLE_ITEM:-}" ] && { printf '%s' "$LOOPABLE_ITEM"; return; }
+  id=$(loopable_state item) && [ -n "$id" ] && { printf '%s' "$id"; return; }
+
+  branch=$(loopable_branch) || return 1
+  slug=$(loopable_slug "${branch#*/}")
+  items=$(loopable_items) || return 1
+  [ -n "$items" ] || return 1
+
+  # A short id, if the branch carries one: the last dash-separated run of at
+  # least six hex characters. Resolved against the backlog by prefix rather
+  # than trusted — a slug ending in `decade` is hex too.
+  short=$(printf '%s' "$slug" | sed -nE 's|.*-([0-9a-f]{6,})$|\1|p')
+  if [ -n "$short" ]; then
+    id=$(printf '%s\n' "$items" | awk -F'\t' -v s="$short" 'index($1, s) == 1 {print $1}')
+    [ "$(printf '%s\n' "$id" | grep -c .)" = 1 ] && { printf '%s' "$id"; return; }
+  fi
+
+  # Otherwise the in_progress item this branch is named after, by SHARED
+  # WORDS rather than by containment. Neither string contains the other in
+  # practice — `feat/loopable-session-hooks` carries an app id the title does
+  # not, and "S2.2 · Session hooks" carries a number the branch does not — so
+  # the match is how many words of at least three letters they have in common.
+  #
+  # TWO WORDS, AND A CLEAR WINNER. One shared word is a coincidence ("the
+  # api"); a tie is two items with equal claim, and picking either writes one
+  # person's work into another person's session. Both resolve to nothing, and
+  # nothing means the hook does nothing at all.
+  id=$(printf '%s\n' "$items" | awk -F'\t' -v s="-$slug-" '
+    $2 != "in_progress" { next }
+    {
+      t = tolower($3); gsub(/[^a-z0-9]+/, "-", t)
+      n = split(t, w, "-"); score = 0
+      for (i = 1; i <= n; i++) if (length(w[i]) >= 3 && index(s, "-" w[i] "-")) score++
+      if (score > best) { best = score; id = $1; ties = 1 }
+      else if (score == best && score > 0) ties++
+    }
+    END { if (best >= 2 && ties == 1) print id }')
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
+}
+
+# Post one activity to the session this worktree has open. Silent, and false
+# on anything at all — no session, no token, no network, a 404 because the
+# session was closed by /loopable:ship while the hook was in flight.
+loopable_activity() { # loopable_activity <kind> <body> [ref json]
+  local p s ref payload
+  p=$(loopable_project) || return 1
+  s=$(loopable_state session) || return 1
+  [ -n "$s" ] || return 1
+  ref=${3:-}
+  [ -n "$ref" ] || ref='{}'
+  payload=$(jq -nc --arg k "$1" --arg b "$2" --argjson r "$ref" \
+    '{kind: $k, body: $b, ref: $r}') || return 1
+  loopable_post "/agent/projects/$p/sessions/$s/activities" "$payload" >/dev/null
+}
+
+# THE BUFFER IS CLAIMED BY RENAMING IT, then posted. Two tool calls finishing
+# at once would otherwise both read a full buffer and post it twice; `mv` is
+# the one operation that can only succeed for one of them. If the post then
+# fails there is nothing to put back — a retried batch is a duplicate, and a
+# dropped one is a gap in a stream that already tolerates gaps.
+loopable_flush_actions() {
+  local d claim body
+  d=$(loopable_state_dir) || return 1
+  [ -s "$d/actions" ] || return 1
+  claim="$d/actions.$$"
+  mv "$d/actions" "$claim" 2>/dev/null || return 1
+  rm -f "$d/at" 2>/dev/null
+  body=$(printf '%s\n%s' "What this session did:" "$(cat "$claim")")
+  rm -f "$claim" 2>/dev/null
+  loopable_activity action "$body"
 }

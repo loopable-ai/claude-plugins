@@ -177,13 +177,18 @@ check_pr() { # check_pr <n> -> prints a denial reason, or nothing
     # lands in an agent's context exactly the way session context does, and
     # this line is where that was forgotten last time.
     title=$(loopable_safe "$(printf '%s' "$row" | cut -f3)")
-    [ "$status" = todo ] && stale="$stale
-  · $title ($id)"
+    # 'ready' is groomed-but-not-started, and it went stale on a merge the
+    # same way todo does: the states widened (20260908040000), the two that
+    # mean "nobody has picked this up" did not.
+    case "$status" in
+      todo|ready) stale="$stale
+  · $title ($id, $status)" ;;
+    esac
   done <<EOF
 $ids
 EOF
 
-  [ -n "$stale" ] && printf "PR #%s names work the backlog still calls 'todo':\n%s\n\nReport it through the MCP before merging — report_progress with in_progress or done. The backlog is the source of truth now, and a merge it never heard about is how it starts lying.\n" "$pr" "$stale"
+  [ -n "$stale" ] && printf "PR #%s names work the backlog has not started:\n%s\n\nReport it through the MCP before merging — report_progress with in_progress or in_review. The backlog is the source of truth now, and a merge it never heard about is how it starts lying.\n" "$pr" "$stale"
   return 0
 }
 

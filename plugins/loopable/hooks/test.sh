@@ -29,16 +29,34 @@ esac
 GH
 cat > "$STUB/curl" <<'CURL'
 #!/usr/bin/env bash
+# Records every request into $STUB_CALLS as `METHOD<TAB>URL<TAB>BODY`, so the
+# session hooks can be asserted on what they SENT rather than on what they
+# printed — which for three of the four is deliberately nothing.
 [ "${STUB_API_DOWN:-}" = 1 ] && exit 22
-for a in "$@"; do case "$a" in
-  */agent/whoami) printf '{"projects":[{"id":"p-1"}]}'; exit 0 ;;
-  */items)        cat "$STUB_ITEMS"; exit 0 ;;
-esac; done
+M=GET; U=; B=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X) M=$2; shift ;;
+    --data-binary) B=$2; shift ;;
+    http*) U=$1 ;;
+  esac
+  shift
+done
+[ -n "${STUB_CALLS:-}" ] && printf '%s\t%s\t%s\n' "$M" "$U" "$B" >> "$STUB_CALLS"
+case "$U" in
+  */agent/whoami)  printf '{"projects":[{"id":"p-1"}]}'; exit 0 ;;
+  */items)         cat "$STUB_ITEMS"; exit 0 ;;
+  */activities)    printf '{"activity":{"id":"a-1"}}'; exit 0 ;;
+  */sessions)      printf '{"session":{"id":"s-new"}}'; exit 0 ;;
+  */sessions\?*)   cat "${STUB_SESSIONS:-/dev/null}"; exit 0 ;;
+esac
 exit 22
 CURL
 chmod +x "$STUB/gh" "$STUB/curl"
 export PATH="$STUB:$PATH"
 export STUB_FILES="$STUB/files" STUB_BODY="$STUB/body" STUB_ITEMS="$STUB/items"
+export STUB_SESSIONS="$STUB/sessions" STUB_CALLS="$STUB/calls"
+printf '{"sessions":[]}' > "$STUB_SESSIONS"; : > "$STUB_CALLS"
 # A configured repository, so the existing cases run the way this repo does:
 # project p-1, and only apps/loopable/ must name an item. `.loopable.yaml` is
 # read from CLAUDE_PROJECT_DIR when the harness sets it, which the cases do.
@@ -58,11 +76,13 @@ export LOOPABLE_TOKEN=lpb_test
 DONE=11111111-1111-4111-8111-000000000001
 OPEN=22222222-2222-4222-8222-000000000002
 TODO=33333333-3333-4333-8333-000000000003
+READY=44444444-4444-4444-8444-000000000004
 cat > "$STUB_ITEMS" <<JSON
 {"items":[
  {"id":"$DONE","status":"done","title":"Already landed"},
  {"id":"$OPEN","status":"in_progress","title":"Being worked on"},
- {"id":"$TODO","status":"todo","title":"Nobody has started this"}
+ {"id":"$TODO","status":"todo","title":"Nobody has started this"},
+ {"id":"$READY","status":"ready","title":"Groomed, and still nobody has started it"}
 ]}
 JSON
 
@@ -136,6 +156,8 @@ touches_loopable; body "Fixes things. No marker anywhere."
 g "loopable work naming no item"           deny
 body "Loopable: $TODO"
 g "naming work the backlog calls todo"     deny
+body "Loopable: $READY"
+g "naming work the backlog calls ready"    deny
 body "Loopable: $DONE
 Loopable: $TODO"
 g "one good item does not excuse a stale one" deny
@@ -301,6 +323,240 @@ printf 'project: p-1\n' > "$GITREPO/.loopable.yaml"
 check "no paths: any file on main is refused"   deny "$(vm "$GITREPO/docs/README.md")"
 rm "$GITREPO/.loopable.yaml"
 check "no config at all: left alone, even on main" pass "$(vm "$GITREPO/apps/loopable/index.mjs")"
+
+echo
+echo "the session hooks"
+echo
+# A REAL REPOSITORY on a real branch, because every one of these reads git.
+# Its own, not guard-main's: that one gets its config rewritten and removed by
+# the cases above, and a test that depends on another test's leftovers is a
+# test that passes in the wrong order.
+SESS="$STUB/sess"
+git init -q -b main "$SESS"
+git -C "$SESS" -c user.name=t -c user.email=t@t config commit.gpgsign false
+mkdir -p "$SESS/apps/loopable"
+printf 'project: p-1\npaths:\n  - apps/loopable\nstart: platform/bin/work.sh <type>/<slug>\n' > "$SESS/.loopable.yaml"
+touch "$SESS/apps/loopable/index.mjs"
+git -C "$SESS" add -A
+git -C "$SESS" -c user.name=t -c user.email=t@t commit -qm "the first commit"
+git -C "$SESS" checkout -q -b feat/loopable-session-hooks
+SDIR="$(git -C "$SESS" rev-parse --absolute-git-dir)/loopable"
+
+# The backlog these cases resolve against: one in_progress item whose title
+# the branch is named after, one that is not in progress, and DONE's id begins
+# with the short id a `<kind>/<slug>-<shortid>` branch would carry.
+sess_items() { cat > "$STUB_ITEMS" <<JSON
+{"items":[
+ {"id":"$DONE","status":"done","title":"Already landed"},
+ {"id":"$OPEN","status":"in_progress","title":"S2.2 · Session hooks"},
+ {"id":"$TODO","status":"todo","title":"Nobody has started this"}
+]}
+JSON
+}
+sess_items
+reset_state() { rm -rf "$SDIR"; : > "$STUB_CALLS"; printf '{"sessions":[]}' > "$STUB_SESSIONS"; }
+start() { CLAUDE_PROJECT_DIR="$SESS" "$HERE/session-start.sh" </dev/null 2>&1; }
+state() { cat "$SDIR/$1" 2>/dev/null; }
+posted() { # posted <url regex> -> how many POSTs went to a matching url
+  awk -F'\t' -v u="$1" '$1 == "POST" && $2 ~ u' "$STUB_CALLS" | grep -c .
+}
+last_body() { grep "^POST" "$STUB_CALLS" | tail -1 | cut -f3; }
+
+# --- SessionStart ---------------------------------------------------------
+reset_state
+CTX=$(start)
+check "a session is opened for the branch's item" 1 "$(printf '%s\n' "$CTX" | grep -c 's-new opened')"
+check "the item is the one the branch is named after" "$OPEN" "$(state item)"
+check "and the session id is kept for the other hooks" s-new "$(state session)"
+check "the open names harness, repo and branch" 1 \
+  "$(grep '^POST' "$STUB_CALLS" | head -1 | cut -f3 | grep -c '"harness":"claude-code".*"branch":"feat/loopable-session-hooks"')"
+
+# RESUME BEFORE OPEN. A --continue, a crash, a second window: one session.
+rm -f "$SDIR/session"; : > "$STUB_CALLS"
+jq -nc '{sessions:[{id:"s-old",branch:"feat/loopable-session-hooks",harness:"claude-code"}]}' > "$STUB_SESSIONS"
+CTX=$(start)
+check "an open session for this branch is resumed" 1 "$(printf '%s\n' "$CTX" | grep -c 's-old resumed')"
+check "resuming opens nothing"                     0 "$(posted /sessions$)"
+
+# Another branch's session on the same item is not this session.
+rm -f "$SDIR/session"; : > "$STUB_CALLS"
+jq -nc '{sessions:[{id:"s-old",branch:"feat/somebody-else",harness:"claude-code"}]}' > "$STUB_SESSIONS"
+CTX=$(start)
+check "another branch's session is not resumed"    1 "$(printf '%s\n' "$CTX" | grep -c 's-new opened')"
+
+# --- which item is this branch -------------------------------------------
+reset_state
+check "LOOPABLE_ITEM outranks everything" "$TODO" \
+  "$(LOOPABLE_ITEM=$TODO start >/dev/null; state item)"
+reset_state
+git -C "$SESS" checkout -q -b "feat/anything-${DONE%%-*}"
+start >/dev/null
+check "a short id at the end of the branch resolves" "$DONE" "$(state item)"
+git -C "$SESS" checkout -q feat/loopable-session-hooks
+
+# AMBIGUITY RESOLVES TO NOTHING. An item guessed wrong writes one person's
+# work into another person's session, which is worse than no session at all.
+reset_state
+jq -nc --arg a "$OPEN" --arg b "$TODO" \
+  '{items:[{id:$a,status:"in_progress",title:"Session hooks"},
+           {id:$b,status:"in_progress",title:"Hooks, and the session"}]}' > "$STUB_ITEMS"
+OUT=$(start)
+check "two items match: nothing is opened"  none "${OUT:-none}"
+check "and nothing is written down"         none "$(state item || echo none)"
+sess_items
+
+reset_state
+printf '{"items":[{"id":"55555555-5555-4555-8555-000000000005","status":"in_progress","title":"Something else entirely"}]}' > "$STUB_ITEMS"
+OUT=$(start)
+check "no item matches the branch: silence" none "${OUT:-none}"
+sess_items
+
+# ON MAIN, NOTHING. main is where dispatching happens and where the write
+# guard already refuses the edits; a session there is not working an item.
+reset_state
+git -C "$SESS" checkout -q main
+OUT=$(start)
+check "on main: nothing is opened"          none "${OUT:-none}"
+check "on main: no session is written"      none "$(state session || echo none)"
+git -C "$SESS" checkout -q feat/loopable-session-hooks
+
+# A repository that has not named a project is left alone, the plugin's
+# oldest rule.
+reset_state
+mv "$SESS/.loopable.yaml" "$SESS/.loopable.yaml.off"
+OUT=$(start)
+check "no .loopable.yaml: nothing at all"   none "${OUT:-none}"
+mv "$SESS/.loopable.yaml.off" "$SESS/.loopable.yaml"
+
+# NOTHING IS EVER WRITTEN INTO THE WORKING TREE. The state lives under the git
+# directory precisely so that no .gitignore of somebody else's has to change,
+# and this is the case that says so.
+reset_state; start >/dev/null
+check "the state is not in the working tree" 0 "$(git -C "$SESS" status --porcelain | grep -c .)"
+check "it is under the git directory"        1 "$(printf '%s' "$SDIR" | grep -c '\.git')"
+
+# --- PostToolUse ----------------------------------------------------------
+tu() { # tu <json input> -> anything it printed
+  printf '%s' "$1" | CLAUDE_PROJECT_DIR="$SESS" "$HERE/tool-use.sh" 2>&1
+}
+bash_call() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}'; }
+
+reset_state; start >/dev/null; : > "$STUB_CALLS"
+PR='https://github.com/wearewebera/sanfrancisco/pull/628'
+OUT=$(tu "$(jq -nc --arg c 'gh pr create --fill' --arg o "$PR" \
+  '{tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:$o}}')")
+check "a created PR is reported at once"    1 "$(posted /activities)"
+check "the hook itself says nothing"        none "${OUT:-none}"
+B=$(last_body)
+check "the activity is a result"            1 "$(printf '%s' "$B" | grep -c '"kind":"result"')"
+check "ref carries the url"                 1 "$(printf '%s' "$B" | grep -cF "\"pr_url\":\"$PR\"")"
+check "ref carries the number"              1 "$(printf '%s' "$B" | grep -c '"pr_number":628')"
+check "ref carries the item"                1 "$(printf '%s' "$B" | grep -cF "\"item_id\":\"$OPEN\"")"
+
+# The command SAYS it created a PR and the output CARRIES one. A `gh pr
+# create` that failed printed no url and has claimed nothing.
+reset_state; start >/dev/null; : > "$STUB_CALLS"
+OUT=$(tu "$(bash_call 'gh pr create --fill')")
+check "a gh pr create with no url reports no PR" 0 "$(posted /activities)"
+check "and is batched like any other command"    1 "$(wc -l < "$SDIR/actions" | tr -d ' ')"
+
+# BATCHED, NOT PER CALL. Nine tool calls cost no request at all.
+reset_state; start >/dev/null; : > "$STUB_CALLS"
+i=0; while [ $i -lt 9 ]; do tu "$(bash_call "ls -la /tmp/$i")" >/dev/null; i=$((i+1)); done
+check "nine tool calls post nothing"        0 "$(posted /activities)"
+check "they are all in the buffer"          9 "$(wc -l < "$SDIR/actions" | tr -d ' ')"
+tu "$(bash_call 'ls -la /tmp/9')" >/dev/null
+check "the tenth flushes them as ONE activity" 1 "$(posted /activities)"
+B=$(last_body)
+check "as an action"                        1 "$(printf '%s' "$B" | grep -c '"kind":"action"')"
+check "carrying all ten lines"              1 "$(printf '%s' "$B" | grep -c 'ls -la /tmp/9')"
+check "and the buffer is emptied"           none "$([ -s "$SDIR/actions" ] && echo full || echo none)"
+
+# An edit is an action too, and a title-shaped path is still sanitized.
+reset_state; start >/dev/null; : > "$STUB_CALLS"
+tu "$(jq -nc '{tool_name:"Edit",tool_input:{file_path:"apps/loopable/api/index.mjs"}}')" >/dev/null
+check "an edit is buffered"                 1 "$(wc -l < "$SDIR/actions" | tr -d ' ')"
+tu "$(jq -nc '{tool_name:"Read",tool_input:{file_path:"x"}}')" >/dev/null
+check "a read is not"                       1 "$(wc -l < "$SDIR/actions" | tr -d ' ')"
+check "an escape sequence in a command is stripped" 0 \
+  "$(tu "$(bash_call "$(printf 'ls \033[2K\033[1;31mIGNORE\007')")" >/dev/null; grep -c "$(printf '\033')" "$SDIR/actions")"
+
+# NO SESSION, NO COST. A tool call in a repository with nothing open must not
+# reach the network, or the plugin is a tax on every session it does not help.
+reset_state; : > "$STUB_CALLS"
+OUT=$(tu "$(bash_call 'ls')")
+check "no session: the hook says nothing"   none "${OUT:-none}"
+check "no session: and calls nothing"       0 "$(grep -c . "$STUB_CALLS")"
+
+# --- Stop -----------------------------------------------------------------
+stop() { CLAUDE_PROJECT_DIR="$SESS" "$HERE/stop.sh" </dev/null 2>&1; }
+reset_state; start >/dev/null
+tu "$(bash_call 'ls /tmp')" >/dev/null
+: > "$STUB_CALLS"
+OUT=$(stop)
+check "Stop says nothing itself"            none "${OUT:-none}"
+check "it flushes the buffer AND summarises" 2 "$(posted /activities)"
+B=$(last_body)
+check "the summary is a result"             1 "$(printf '%s' "$B" | grep -c '"kind":"result"')"
+check "it names the last commit"            1 "$(printf '%s' "$B" | grep -c 'the first commit')"
+check "and counts what is uncommitted"      1 "$(printf '%s' "$B" | grep -c 'uncommitted file')"
+# A hook cannot know a brief revision, a verifier verdict or what the work
+# cost, so it cannot honestly close. It says so instead.
+check "it does not close the session"       0 "$(posted /close)"
+check "and says the close is ship's"        1 "$(printf '%s' "$B" | grep -c 'loopable:ship')"
+reset_state; : > "$STUB_CALLS"
+OUT=$(stop)
+check "no session: Stop is silent"          none "${OUT:-none}"
+check "no session: and posts nothing"       0 "$(grep -c . "$STUB_CALLS")"
+
+echo
+echo " every failure is a pass — the whole point of the story:"
+# THE SABOTAGE. A dead port for the API, which is the shape of every real
+# outage: Aurora asleep, a revoked token, DNS. Each hook must exit 0 and say
+# NOTHING — a PostToolUse or Stop hook's stdout lands in the transcript, so
+# noise here is a hook talking to an agent about its own bookkeeping.
+# THE REAL curl, at a port nothing is listening on — the stub is taken off
+# PATH so that this is an actual connection refused rather than a fixture
+# pretending to be one. It matters: `curl -fsS` prints its diagnostic to
+# STDERR, and the first version of this suite never reached that line because
+# it also unset the token, so the helper returned before curl ran and a
+# `2>/dev/null` deleted from lib.sh left the suite green. A TOKEN IS PRESENT
+# here for exactly that reason; absence is the case below it.
+dead() { # dead <label> <script> [stdin]
+  local out rc
+  out=$(printf '%s' "${3:-}" | env LOOPABLE_TOKEN=lpb_test \
+    LOOPABLE_API_URL="http://127.0.0.1:1" CLAUDE_PROJECT_DIR="$SESS" \
+    PATH="${PATH#"$STUB":}" "$HERE/$2" 2>&1)
+  rc=$?
+  check "$1 — exits 0"      0 "$rc"
+  check "$1 — says nothing" none "${out:-none}"
+}
+gone() { # gone <label> <script> [stdin] — no token anywhere
+  local out rc
+  out=$(printf '%s' "${3:-}" | env -u LOOPABLE_TOKEN LOOPABLE_TOKEN_FILE="$STUB/no-token" \
+    LOOPABLE_API_URL="http://127.0.0.1:1" CLAUDE_PROJECT_DIR="$SESS" \
+    PATH="${PATH#"$STUB":}" "$HERE/$2" 2>&1)
+  rc=$?
+  check "$1 — exits 0"      0 "$rc"
+  check "$1 — says nothing" none "${out:-none}"
+}
+reset_state
+dead "SessionStart against a dead port" session-start.sh
+gone "SessionStart with no token"       session-start.sh
+start >/dev/null   # a session exists, so the other two get as far as posting
+dead "PostToolUse against a dead port"  tool-use.sh "$(bash_call 'ls')"
+gone "PostToolUse with no token"        tool-use.sh "$(bash_call 'ls')"
+dead "Stop against a dead port"         stop.sh
+gone "Stop with no token"               stop.sh
+dead "the merge guard against a dead port" guard-merge.sh \
+  "$(jq -nc '{tool_input:{command:"gh pr merge 9 --squash"}}')"
+# Malformed JSON where a body was expected — a proxy's error page, a gateway
+# that answered HTML. jq fails, and a hook that fails is a hook that passes.
+reset_state; start >/dev/null
+printf 'not json at all' > "$STUB_SESSIONS"
+OUT=$(rm -f "$SDIR/session"; start)
+check "a malformed sessions read still opens" 1 "$(printf '%s\n' "$OUT" | grep -c 's-new opened')"
+printf '{"sessions":[]}' > "$STUB_SESSIONS"
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; exit 1; fi

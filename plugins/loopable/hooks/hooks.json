@@ -8,6 +8,12 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/open-work.sh\"",
             "timeout": 10,
             "statusMessage": "reading the Loopable backlog"
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 10,
+            "statusMessage": "opening the Loopable session for this branch"
           }
         ]
       }
@@ -32,6 +38,29 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/guard-main.sh\"",
             "timeout": 5,
             "statusMessage": "checking the branch against the worktree rule"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/tool-use.sh\"",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh\"",
+            "timeout": 10
           }
         ]
       }
