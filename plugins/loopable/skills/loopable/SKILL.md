@@ -1,6 +1,6 @@
 ---
 name: loopable-backlog
-description: Use when working in a repository that belongs to a Loopable project — planning, picking up work, or landing a PR. Explains that the Loopable backlog is the source of truth for that work, which MCP tool does what, why an edit on main is refused, why a PR touching tracked paths must name its work item, and what the session hooks already report on your behalf. Also defines the vocabulary — feature, epic, story, task, bug, decision, session, brief, environment and the item states — in vocabulary.md beside this file. Triggers on "what's next", "the loopable backlog", "report progress", "propose", "add_item", "landing a PR", "why was my edit refused", "post_activity", "open_session", ".loopable.yaml", "epic", "story", "task", "bug", "what kind", "which kind".
+description: Use when working in a repository that belongs to a Loopable project — planning, picking up work, or landing a PR. Explains that the Loopable backlog is the source of truth for that work, which MCP tool does what, why an edit on main is refused, why a PR touching tracked paths must name its work item, and what the session hooks already report on your behalf. Also defines the vocabulary — feature, epic, story, task, bug, decision, session, brief, environment and the item states — in vocabulary.md beside this file. Triggers on "what's next", "start on this item", "/loopable:start", "/loopable:ship", "ship it", "close the session", "open the PR", "the loopable backlog", "report progress", "propose", "add_item", "landing a PR", "why was my edit refused", "post_activity", "open_session", ".loopable.yaml", "epic", "story", "task", "bug", "what kind", "which kind".
 ---
 
 # The Loopable backlog is the source of truth
@@ -22,7 +22,9 @@ describe reasoning; the backlog says what is left to do.
 | | |
 |---|---|
 | `whoami` | the project ids this token can see |
-| `list_backlog` | what exists. Start here. |
+| `pull_item` | the brief pack of one item. **The first call of a work session** — see below. |
+| `next_ready` | what to pick up next, as the same pack. `null` means nothing is ready or free. |
+| `list_backlog` | what exists. Start here when browsing rather than starting. |
 | `get_item` | one item, with its links and tags |
 | `node` | one node and the edges touching it. The cheapest way to see what an item is joined to. |
 | `neighbourhood` | what is around a node, one or two hops, filtered by relation. Orientation before building. |
@@ -38,6 +40,51 @@ describe reasoning; the backlog says what is left to do.
 the work came from**, not how much anybody is trusted: our own decided work
 goes in the backlog, an outside ask goes in the queue. Routing everything
 through the queue would not add a safeguard, it would add a rubber stamp.
+
+## Starting work: pull the pack first
+
+Before writing anything, `pull_item` on the item you are about to build (or
+`next_ready` to be given one). It is one bounded answer carrying the item and
+its ask, the acceptance criteria with how each will be checked, one hop of the
+graph **by title**, the standing decisions that govern it, and the registered
+environments to point at. It replaces get_item plus neighbourhood plus
+list_decisions, and it is capped at 24 KB, so it costs the same every time and
+there is no judgement call about whether you can afford it.
+
+**Read `ready_blockers` first.** A non-empty list means nobody has groomed the
+item — no criterion carries a verify method, or the project has no registered
+environment — and it is not work to pick up yet. Say so and ask, rather than
+starting.
+
+**Build to the criteria, not to the title.** They are the spec, they are never
+trimmed out of a pack however big it gets, and `close_session` will ask you for
+each one by the revision (`brief_rev`) you were given.
+
+**The pack carries no ids but the item's own** — everything else is titles, so
+look an id up by title when you need one. The item's own id is the one that
+goes in `report_progress` and in `Loopable: <id>` in the PR body.
+
+**Pulling is not claiming.** `next_ready` is a read; two harnesses asking at
+once are told the same item. What claims it is `/loopable:start`:
+
+```
+/loopable:start <item id | ref | next>
+```
+
+That is the one command for beginning work, and it does the whole sequence in
+order — pull the pack, refuse an item that is not `ready` and list its blockers,
+make the worktree from `origin/main` (through the repository's own `start:`
+command when it has one), report `in_progress`, open the session, print the
+pack. Use it instead of doing those five by hand: the order is the point, and
+the step that gets skipped by hand is the refusal.
+
+It refuses loudly rather than silently — a non-zero exit and a sentence — and a
+refusal means nothing was created and nothing was reported. When it refuses
+because the item is not ready, the blockers it prints are the answer: say them
+and stop, rather than starting anyway.
+
+It cannot move your session into the worktree it made. Its last line says where
+the work is; open a new session there, or keep every edit under that path.
 
 ## Which kind: read vocabulary.md
 
@@ -56,7 +103,8 @@ story; if you cannot say what the client would call it, it is not an epic.
 ## One worktree per item
 
 An edit on `main` to a tracked path is refused by the plugin. Start a branch in
-its own worktree — the refusal prints how, from `start:` — and work there. One
+its own worktree — `/loopable:start <item>` does it, and the refusal prints that
+along with the repository's own `start:` line — and work there. One
 worktree per item is what lets several agents share one repository: each branch
 starts from `origin/main`, each PR names its item, and nothing two agents do
 lands in the same working tree. `LOOPABLE_ALLOW_MAIN=1` overrides the refusal
@@ -79,16 +127,44 @@ What the hooks will **not** do is close the session. A `complete` close is a
 claim — brief revision, HEAD sha, verifier verdict, every criterion accounted
 for, screenshots, cost — and a hook watching a process end knows none of it. A
 session left open says the work is not finished, which is true. `/loopable:ship`
-closes it with the contract.
+closes it with the contract, and it is the only thing that does.
 
 If nothing is reported, the branch's item did not resolve — `main`, no
 `.loopable.yaml`, or two items with equal claim on the branch name. Set
 `LOOPABLE_ITEM=<id>` and it will.
 
-## Report as part of finishing, not afterwards
+## Finishing: run `/loopable:ship`
 
 A backlog is only as current as the moment somebody updates it, and updating it
-as a separate act of remembering is how it goes stale. So:
+as a separate act of remembering is how it goes stale. So finishing is one
+command, the way starting is:
+
+```
+/loopable:ship
+```
+
+It prepares — refusing a worktree with no session, an uncommitted tree or a
+branch nobody pushed, each with the command that fixes it, and **never
+committing or pushing for you** — then dispatches the `verifier` and the
+`reviewer`, then closes. You do not write either report and you do not edit what
+they return: a report you corrected is your report, and the verdict is the one
+thing in the close contract that has to come from a hand other than the one that
+built the thing.
+
+The close is the report. It carries the brief revision, the HEAD sha, the
+verdict and its reason, every criterion with an `implemented_at` and a status,
+the screenshot attachment ids and the cost — and it moves the item to
+`in_review` by itself, so **do not `report_progress` afterwards**. The verifier's
+and reviewer's reports are attached to the session, with the screenshots they
+cite; the pull request carries the criteria as a checklist and `Loopable: <ref>`.
+
+A verdict of `fail` or `not_run` still closes, because the contract wants the
+truth: the pull request says so, the command exits 1, and the work is to fix
+what the report names, commit, push and ship again. **Push after you close and
+the close is stale** — it was bound to a commit, and a branch that moved
+afterwards is a branch nobody verified.
+
+The rules the guard applies to all of that:
 
 **A PR that touches a tracked path must name its work item in the body.**
 
@@ -96,13 +172,32 @@ as a separate act of remembering is how it goes stale. So:
 Loopable: 4e90ea71-bc6a-445d-8517-f732d064a1f5
 ```
 
-`report_progress` it before merging — `in_review` when the PR is open, which is
-as far as an agent goes: `verifying` is the deploy and `done` is a person
-accepting the work, and the API refuses both from a token. The merge guard
-refuses a PR that names nothing, or that names an item the backlog still calls
-`todo`. If something
-genuinely has no item, say so on purpose — `Loopable: none — <why>` — because a
-stated exception can be argued with and silence cannot.
+**And the item has to be `in_review`, with a close at that PR's HEAD sha.**
+
+The merge guard refuses a PR that names nothing; that names an item the backlog
+does not call `in_review`; or whose newest complete session was closed at a
+different commit from the one about to be merged. A close says "I verified
+this", and a branch that moved afterwards is a branch nobody verified — so
+**push after you close and the close is stale**: close again at the new HEAD.
+
+`/loopable:ship` is what satisfies both, and `close_session` through the MCP is
+the same payload by hand for a session the command cannot reach. Either way a
+complete close moves the item to `in_review` — that is the report, and
+`report_progress` is not a substitute for it. `verifying` is the deploy and
+`done` is a person accepting the work; the API refuses both from a token.
+
+A verdict of `fail` is refused, and so is `not_run` — unless the item has no
+acceptance criterion a browser has to check, in which case there was nothing
+for a browser verifier to drive and the verdict is honest.
+
+If something genuinely has no item, say so on purpose — `Loopable: none —
+<why>` — because a stated exception can be argued with and silence cannot. It
+is the one thing the guard honours even when the backlog is unreachable: unlike
+every other hook here, this one **refuses what it cannot verify**, because a
+merge cannot be taken back and "the API was down" must not be a way through.
+`LOOPABLE_ALLOW_MERGE=1` is one, and it belongs to whoever started the session:
+the hook reads its own environment, so prefixing your command with it does
+nothing.
 
 ## What the guards will not catch
 

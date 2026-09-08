@@ -16,7 +16,7 @@ sentence so a client can read it on its own.
 
 # The words we use
 
-Loopable has six words for the shape of work and four for the machinery
+Loopable has six words for the shape of work and five for the machinery
 around it. They are worth defining once because four readers use them at
 once — the product owner writing a backlog, a person reading a roadmap, a
 coding agent picking something up, and a client asking what is going on —
@@ -165,6 +165,25 @@ supposed to be true at it.
 **Why.** "It works" is not evidence. An environment gives a criterion
 somewhere to be verified, which is what separates a report of progress from a
 demonstration of it.
+
+## Refs
+
+A ref is the short name of a work item or a feature: a letter for its kind and
+a number the project hands out once, like s41 or f7.
+
+**When.** Whenever you need to name one thing to somebody else — in a chat, in
+a stand-up, in a branch name, in a PR body, in a note on an activity. Cite an
+item by its ref: `e` is an epic, `s` a story, `t` a task, `b` a bug and `f` a
+feature. Across projects, put the project key in front: `loop/s41`.
+
+**Not when.** Not as a title. A ref says which thing, never what it is, so a
+sentence that is only refs is a sentence nobody can read.
+
+**Why.** One counter per project serves both planes, so the number alone names
+one thing and the letter is a free hint about what it is — which matters
+because the letter is what gets lost, in speech and in a search box. A number
+is never reused, so a ref written down a year ago still points where it
+pointed. The uuid is still there and still works; it is simply not a name.
 
 ## States
 

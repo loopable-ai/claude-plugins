@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Shared by both Loopable hooks: how to reach the backlog, and when not to try.
+# Shared by every Loopable hook: how to reach the backlog, and when not to try.
 #
-# EVERY FAILURE HERE IS A PASS. A hook that blocks real work because Aurora was
+# EVERY FAILURE HERE IS A PASS — with ONE stated exception, guard-merge.sh,
+# which refuses what it cannot verify because a merge cannot be taken back.
+# The helpers below therefore report failure honestly (a non-zero return, not
+# an empty answer that reads like "no") and each CALLER decides what silence
+# means for it. See "cannot verify" in guard-merge.sh.
+#
+# A hook that blocks real work because Aurora was
 # asleep, or because somebody has no token, is worse than no hook at all — the
 # person it blocks cannot easily override it, and the first thing they will do
 # is switch it off. So the guard only ever speaks up on a CONFIDENT negative:
@@ -20,10 +26,20 @@ loopable_token() {
 
 # A short timeout on purpose. This runs in front of a person waiting to merge,
 # and the budget for being helpful is a couple of seconds.
+#
+# A COMMAND IS NOT A HOOK, and `LOOPABLE_MAX_TIME` is where the difference is
+# said. A hook that waits eight seconds on a sleeping Aurora has spent
+# somebody's session on its own bookkeeping, so it gives up early and silently;
+# `bin/start.sh` was ASKED for the backlog and has nothing to do without it, so
+# it waits longer and reports what went wrong. Four seconds stays the default,
+# and every hook keeps the budget it was written with.
+LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-4}"
+
 loopable_get() { # loopable_get <path> -> body on stdout, non-zero if unreachable
   local token; token=$(loopable_token) || return 1
   [ -n "$token" ] || return 1
-  curl -fsS --max-time 4 -H "Authorization: Bearer $token" "$LOOPABLE_API$1" 2>/dev/null
+  curl -fsS --max-time "$LOOPABLE_MAX_TIME" \
+    -H "Authorization: Bearer $token" "$LOOPABLE_API$1" 2>/dev/null
 }
 
 # The write half. Same discipline, same silence: curl's own diagnostics go to
@@ -32,7 +48,18 @@ loopable_get() { # loopable_get <path> -> body on stdout, non-zero if unreachabl
 loopable_post() { # loopable_post <path> <json body> -> body on stdout, non-zero
   local token; token=$(loopable_token) || return 1
   [ -n "$token" ] || return 1
-  curl -fsS --max-time 4 -X POST \
+  curl -fsS --max-time "$LOOPABLE_MAX_TIME" -X POST \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    --data-binary "$2" "$LOOPABLE_API$1" 2>/dev/null
+}
+
+# The third verb, because reporting progress is a PATCH and nothing else here
+# needed one: `report_progress` in the MCP is `PATCH /items/{id}` with a status
+# and a note, and bin/start.sh takes that same edge when it claims an item.
+loopable_patch() { # loopable_patch <path> <json body> -> body on stdout, non-zero
+  local token; token=$(loopable_token) || return 1
+  [ -n "$token" ] || return 1
+  curl -fsS --max-time "$LOOPABLE_MAX_TIME" -X PATCH \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     --data-binary "$2" "$LOOPABLE_API$1" 2>/dev/null
 }
@@ -102,7 +129,12 @@ loopable_paths_phrase() {
 
 # Every item this token can see in the configured project — or, with no
 # project configured, in every project it can see — as
-# `<id>\t<status>\t<title>` lines.
+# `<id>\t<status>\t<title>\t<ref>` lines.
+#
+# THE REF IS THE FOURTH FIELD and rides along everywhere the first three go:
+# every caller of this function is a place a person might have written `s41`
+# instead of a uuid (S1.10), and a second fetch to translate one would be a
+# second answer to "what is in this backlog".
 loopable_items() {
   local me projects
   projects=$(loopable_config project) || projects=""
@@ -113,8 +145,91 @@ loopable_items() {
   local p
   for p in $projects; do
     loopable_get "/agent/projects/$p/items" |
-      jq -r '.items[] | [.id, .status, .title] | @tsv' || return 1
+      jq -r '.items[] | [.id, .status, .title, .ref] | @tsv' || return 1
   done
+}
+
+# --------------------------------------------- naming an item in a PR body --
+#
+# WHATEVER FOLLOWS `Loopable:` IS OPAQUE TO EVERY CALLER. The merge guard used
+# to carry its own 36-character regex, which made the shape of a reference a
+# property of the guard rather than of the backlog: the day short ids became a
+# way to name an item (S1.10), the guard would have gone on refusing them while
+# the MCP accepted them, and two ideas of "what names an item" would be loose
+# in one plugin.
+#
+# So there is one pair of functions. `loopable_refs` harvests the raw string —
+# anything up to the first space — and `loopable_resolve_ref` is the ONLY thing
+# that decides what a string means, by asking the backlog rather than by
+# matching a shape. Adding a new spelling is one edit here and no edit anywhere
+# else, and a guard rule written on top of a resolved id (the HEAD-sha rule
+# below) composes with it automatically.
+loopable_refs() { # loopable_refs <pr body> -> one raw ref per line
+  # grep first so the marker is matched case-insensitively the same way the
+  # `none` escape hatch is: sed's `I` flag is a GNU extension and this runs on
+  # whatever anybody's laptop has.
+  printf '%s\n' "$1" |
+    grep -iE '^[[:space:]]*Loopable:[[:space:]]*[^[:space:]]' |
+    sed -nE 's|^[[:space:]]*[Ll][Oo][Oo][Pp][Aa][Bb][Ll][Ee]:[[:space:]]*([^[:space:]]+).*|\1|p' |
+    grep -viE '^none$'
+}
+# RESOLVED AGAINST THE BACKLOG, NEVER TRUSTED. A full id has to be an id this
+# token can actually see; a SHORT REF (s41, loop/s41) is looked up as the ref
+# the backlog itself hands back; a shorter string is a prefix, and a prefix
+# that matches two items resolves to nothing — the loopable_item tie rule, for
+# the same reason. Nothing here decides that an unresolved ref is fine: it
+# returns non-zero and the caller says what that means.
+loopable_resolve_ref() { # loopable_resolve_ref <ref> [items tsv] -> an id
+  local ref id items short
+  ref=$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')
+  [ -n "$ref" ] || return 1
+  items=${2:-}
+  [ -n "$items" ] || items=$(loopable_items) || return 1
+
+  # A full id, exactly.
+  id=$(printf '%s\n' "$items" | awk -F'\t' -v r="$ref" '$1 == r {print $1; exit}')
+  [ -n "$id" ] && { printf '%s' "$id"; return; }
+
+  # A SHORT REF (S1.10): `s41`, `loop/s41` — the fourth field, which is what
+  # the backlog itself calls the row. The project key in front is stripped:
+  # `.loopable.yaml` already decides which project this repository talks to,
+  # and a key naming another one resolves to nothing here anyway. The letter
+  # is a hint about the kind; the number is the identity.
+  short=${ref##*/}
+  if printf '%s' "$short" | grep -qE '^[estbf][0-9]+$'; then
+    id=$(printf '%s\n' "$items" |
+      awk -F'\t' -v r="$short" 'tolower($4) == r {print $1; exit}')
+    [ -n "$id" ] && { printf '%s' "$id"; return; }
+  fi
+
+  # Otherwise a PREFIX of an id, and only when exactly one item matches — the
+  # loopable_item tie rule, for the same reason.
+  id=$(printf '%s\n' "$items" | awk -F'\t' -v r="$ref" 'index($1, r) == 1 {print $1}')
+  [ "$(printf '%s\n' "$id" | grep -c .)" = 1 ] || return 1
+  printf '%s' "$id"
+}
+
+# ------------------------------------------- what a session claimed, and at --
+#
+# The close contract (S1.3) as three fields per closed session: the state, the
+# sha it was built at, and what the verifier made of it. `state=complete` is
+# asked of the API rather than filtered here, so a session that ended in
+# `error` — which claims nothing and proves nothing — never reaches a caller.
+loopable_sessions() { # loopable_sessions <project> <item> -> state\tsha\tverdict\treason
+  local out
+  out=$(loopable_get "/agent/projects/$1/sessions?item_id=$2&state=complete") || return 1
+  printf '%s' "$out" |
+    jq -r '.sessions[]? | [.state, (.head_sha // ""), (.verdict // ""), (.verdict_reason // "")] | @tsv'
+}
+
+# The verify methods of an item's acceptance criteria, one per line. Only
+# `browser` matters to a caller today: it is the method S1.3 made screenshots
+# mandatory for, and therefore the one that says a verifier had something to
+# drive. An item with none of them is an item `not_run` can be honest about.
+loopable_verify_methods() { # loopable_verify_methods <project> <item>
+  local out
+  out=$(loopable_get "/agent/projects/$1/items/$2") || return 1
+  printf '%s' "$out" | jq -r '.brief.criteria[]?.verify // empty'
 }
 
 # ONE PLACE THAT MAKES BACKLOG TEXT SAFE TO SHOW.
@@ -226,6 +341,15 @@ loopable_item() { # -> a work item id, or non-zero
   slug=$(loopable_slug "${branch#*/}")
   items=$(loopable_items) || return 1
   [ -n "$items" ] || return 1
+
+  # A REF, if the branch ends in one: `feat/loopable-brief-pack-s41`. First,
+  # because it is the only step that is exact — a ref is a name somebody chose
+  # to put there, and the two steps under it are inference.
+  short=$(printf '%s' "$slug" | sed -nE 's|.*-([estbf][0-9]+)$|\1|p')
+  if [ -n "$short" ]; then
+    id=$(loopable_resolve_ref "$short" "$items") && [ -n "$id" ] &&
+      { printf '%s' "$id"; return; }
+  fi
 
   # A short id, if the branch carries one: the last dash-separated run of at
   # least six hex characters. Resolved against the backlog by prefix rather

@@ -53,7 +53,12 @@ loopable_touches "$REL" || exit 0
 START=$(loopable_config start) || START=""
 [ -n "$START" ] || START="git worktree add <path> -b <type>/<slug> origin/main"
 
-jq -nc --arg r "$(printf '%s is on branch %s. Work on %s happens on a branch in its own worktree, never on main — one worktree per item is what lets several agents share this repository, and the PR that lands it must name its Loopable item.\n\nStart one:\n\n  %s\n\nthen make the edit there. LOOPABLE_ALLOW_MAIN=1 overrides this once, on purpose.' \
+# TWO WAYS TO START, and the command is named first because it does the whole
+# sequence — the pack, the readiness refusal, the worktree from origin/main, the
+# progress report, the session — while `start:` is only the worktree half. The
+# repository's own line stays: it is what a person types, what runs when there
+# is no Loopable item to pull, and what /loopable:start itself executes.
+jq -nc --arg r "$(printf '%s is on branch %s. Work on %s happens on a branch in its own worktree, never on main — one worktree per item is what lets several agents share this repository, and the PR that lands it must name its Loopable item.\n\nStart one:\n\n  /loopable:start <item id | ref | next>\n\nwhich pulls the item brief, refuses work that is not ready, makes the worktree and reports it. Or, by hand:\n\n  %s\n\nthen make the edit there. LOOPABLE_ALLOW_MAIN=1 overrides this once, on purpose.' \
   "$REL" "$BRANCH" "$(loopable_paths_phrase)" "$START")" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
