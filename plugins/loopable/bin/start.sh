@@ -98,7 +98,8 @@ KIND=$(field '.item.kind')
 TITLE=$(field '.item.title')
 STATUS=$(field '.item.status')
 NOTE=$(field '.item.status_note')
-# S1.10's short id when the item carries one; the head of the uuid until then.
+# The item's ref — a plain number — when it carries one; the head of the uuid
+# until then.
 # Read rather than derived, so that the day items have refs the branch names
 # start using them with no edit here.
 REF=$(field '.item.ref')
@@ -154,7 +155,7 @@ fi
 #
 # The title, as words a branch can carry: lowercase ascii, hyphens, and no
 # leading item code — "S2.4 · /loopable:start" is `loopable-start`, because the
-# code is already in the short id and a branch reading `s2-4-loopable-start`
+# code is already in the ref and a branch reading `s2-4-loopable-start`
 # says the same thing twice.
 slug_of() {
   printf '%s' "$1" | tr 'A-Z' 'a-z' |
@@ -203,9 +204,9 @@ START=$(loopable_config start) || START=""
 if [ -n "$START" ]; then
   case "$START" in
     *'<shortid>'*|*'<ref>'*) SLUG_SUB="$SLUG" ;;
-    # No place for the short id in the template, so it rides on the slug: a
-    # branch ending in one is what lets every session hook resolve the item
-    # exactly rather than by matching words.
+    # No place for the ref in the template, so it rides on the slug: a branch
+    # ending in one — `feat/loopable-integer-refs-249` — is what lets every
+    # session hook resolve the item exactly rather than by matching words.
     *) SLUG_SUB="$SLUG-$SHORT" ;;
   esac
   CMD=$(printf '%s' "$START" |

@@ -169,8 +169,11 @@ The rules the guard applies to all of that:
 **A PR that touches a tracked path must name its work item in the body.**
 
 ```
-Loopable: 4e90ea71-bc6a-445d-8517-f732d064a1f5
+Loopable: 41
 ```
+
+The ref (a plain number), or the item's uuid. The letter refs wore before
+2026-09-08 (`s41`) still resolve.
 
 **And the item has to be `in_review`, with a close at that PR's HEAD sha.**
 

@@ -136,15 +136,18 @@ OPEN=22222222-2222-4222-8222-000000000002
 TODO=33333333-3333-4333-8333-000000000003
 READY=44444444-4444-4444-8444-000000000004
 REVIEW=55555555-5555-4555-8555-000000000055
-# Every row carries its REF as well as its id (S1.10): the backlog hands both
-# back on every read, and a person writing `Loopable:` has the short one.
+# Every row carries its REF as well as its id: the backlog hands both back on
+# every read, and a person writing `Loopable:` has the short one. A ref is a
+# PLAIN NUMBER since 2026-09-08, which is what these rows are spelled with —
+# the legacy letter form is tested below, against these same rows, because
+# what has to keep working is an old PR body against today's backlog.
 cat > "$STUB_ITEMS" <<JSON
 {"items":[
- {"id":"$DONE","status":"done","title":"Already landed","ref":"s11"},
- {"id":"$OPEN","status":"in_progress","title":"Being worked on","ref":"s22"},
- {"id":"$TODO","status":"todo","title":"Nobody has started this","ref":"s33"},
- {"id":"$READY","status":"ready","title":"Groomed, and still nobody has started it","ref":"t44"},
- {"id":"$REVIEW","status":"in_review","title":"Closed with a payload, waiting to be merged","ref":"s55"}
+ {"id":"$DONE","status":"done","title":"Already landed","ref":"11"},
+ {"id":"$OPEN","status":"in_progress","title":"Being worked on","ref":"22"},
+ {"id":"$TODO","status":"todo","title":"Nobody has started this","ref":"33"},
+ {"id":"$READY","status":"ready","title":"Groomed, and still nobody has started it","ref":"44"},
+ {"id":"$REVIEW","status":"in_review","title":"Closed with a payload, waiting to be merged","ref":"55"}
 ]}
 JSON
 
@@ -214,13 +217,24 @@ g "the marker is case-insensitive"         pass
 body "Loopable: ${REVIEW%%-*}"
 g "a short id resolves to the same item"   pass
 # AND THE SHORT REF ITSELF, which is the spelling a person actually has to
-# hand: the same item, the same sha rule, three ways of writing its name.
+# hand: the same item, the same sha rule, several ways of writing its name.
+body "Loopable: 55"
+g "a bare number resolves to the same item"   pass
+body "Loopable: loop/55"
+g "a ref with the project key in front"       pass
+# THE OLD SPELLING, AGAINST THE NEW BACKLOG. Until 2026-09-08 a ref wore a
+# kind letter, and the PR bodies and session notes written then are still read
+# by this guard. The letter is dropped and the number is what matches — which
+# is why a letter that has since become WRONG (s55 is a story today, and t55
+# would be somebody misremembering) still lands on the same row.
 body "Loopable: s55"
-g "a ref resolves to the same item"        pass
+g "a legacy ref, letter and all"              pass
 body "Loopable: S55"
-g "a ref in capitals"                      pass
+g "a legacy ref in capitals"                  pass
+body "Loopable: t55"
+g "a legacy ref whose letter is now wrong"    pass
 body "Loopable: loop/s55"
-g "a ref with the project key in front"    pass
+g "a legacy ref with the project key"         pass
 # not_run IS NOT A SYNONYM FOR fail. With no criterion a browser has to check,
 # there was nothing for a browser verifier to drive and the verdict is true.
 body "Loopable: $REVIEW"; closed "$HEAD_SHA" not_run "no UI in this change"
@@ -260,16 +274,20 @@ body "Loopable: $READY"
 g "naming work the backlog calls ready"    deny
 # The ref reaches the same verdict as the uuid it resolves to — the whole point
 # of accepting it is that it changes the spelling and nothing else.
-body "Loopable: s33"
+body "Loopable: 33"
 g "a ref naming work the backlog calls todo"  deny
-body "Loopable: t44"
+body "Loopable: 44"
 g "a ref naming work the backlog calls ready" deny
-body "Loopable: LOOP/s33"
+body "Loopable: LOOP/33"
 g "a prefixed ref, still todo"                deny
+body "Loopable: s33"
+g "a legacy ref, still todo"                  deny
 # A ref nothing answers to is a cannot-verify, and cannot-verify refuses —
-# S2.6's rule, applied to S1.10's spelling without a line of its own.
-body "Loopable: s99"
+# S2.6's rule, applied to the ref spelling without a line of its own.
+body "Loopable: 99"
 g "a ref that resolves to nothing"            deny
+body "Loopable: s99"
+g "a legacy ref that resolves to nothing"     deny
 # S2.6 NARROWED THE STATUS RULE from "not todo" to "in_review". A status is a
 # sentence an agent types; the close contract is not.
 body "Loopable: $OPEN"
@@ -531,12 +549,13 @@ SDIR="$(git -C "$SESS" rev-parse --absolute-git-dir)/loopable"
 
 # The backlog these cases resolve against: one in_progress item whose title
 # the branch is named after, one that is not in progress, and DONE's id begins
-# with the short id a `<kind>/<slug>-<shortid>` branch would carry.
+# with the short id a `<kind>/<slug>-<shortid>` branch would carry. The refs
+# are plain numbers, which is what the backlog hands back since 2026-09-08.
 sess_items() { cat > "$STUB_ITEMS" <<JSON
 {"items":[
- {"id":"$DONE","status":"done","title":"Already landed","ref":"s11"},
- {"id":"$OPEN","status":"in_progress","title":"S2.2 · Session hooks","ref":"s22"},
- {"id":"$TODO","status":"todo","title":"Nobody has started this","ref":"s33"}
+ {"id":"$DONE","status":"done","title":"Already landed","ref":"11"},
+ {"id":"$OPEN","status":"in_progress","title":"S2.2 · Session hooks","ref":"22"},
+ {"id":"$TODO","status":"todo","title":"Nobody has started this","ref":"33"}
 ]}
 JSON
 }
@@ -576,13 +595,21 @@ reset_state
 check "LOOPABLE_ITEM outranks everything" "$TODO" \
   "$(LOOPABLE_ITEM=$TODO start >/dev/null; state item)"
 # A REF AT THE END OF THE BRANCH is the first thing tried, and it is exact —
-# `feat/loopable-brief-pack-s33` is the branch /loopable:start names. It beats
+# `feat/loopable-brief-pack-33` is the branch /loopable:start names. It beats
 # the word match below it: nothing about this branch says "session hooks", and
 # the item it resolves to is the one whose ref is written on it.
 reset_state
+git -C "$SESS" checkout -q -b "feat/loopable-anything-at-all-33"
+start >/dev/null
+check "a bare number at the end of the branch resolves" "$TODO" "$(state item)"
+git -C "$SESS" checkout -q feat/loopable-session-hooks
+# AND THE BRANCH NAMES /loopable:start CUT BEFORE 2026-09-08, which are still
+# checked out and still worked on. The letter is dropped and the number is the
+# identity, exactly as it is in a PR body.
+reset_state
 git -C "$SESS" checkout -q -b "feat/loopable-anything-at-all-s33"
 start >/dev/null
-check "a ref at the end of the branch resolves" "$TODO" "$(state item)"
+check "a legacy ref at the end of the branch resolves" "$TODO" "$(state item)"
 git -C "$SESS" checkout -q feat/loopable-session-hooks
 
 reset_state
@@ -842,7 +869,7 @@ JSON
 }
 start_items() { cat > "$STUB_ITEMS" <<JSON
 {"items":[
- {"id":"$READY","status":"ready","title":"$READY_TITLE","ref":"s41"},
+ {"id":"$READY","status":"ready","title":"$READY_TITLE","ref":"41"},
  {"id":"$TODO","status":"todo","title":"Nobody has groomed this"}
 ]}
 JSON
@@ -869,7 +896,7 @@ worktrees() { git -C "$SRT" worktree list | grep -c .; }
 # THE REF, NOT THE UUID. The pack carries no ref yet, so it comes from the
 # backlog's own fourth field — and a branch ending in one is the only exact
 # answer the session hooks have to "which item is this branch".
-BRANCH_READY="feat/x-the-start-command-s41"
+BRANCH_READY="feat/x-the-start-command-41"
 
 echo " must REFUSE, and say why — nothing created, nothing reported:"
 BEFORE=$(worktrees)
@@ -974,7 +1001,7 @@ check "and it is reported in_progress" 1 "$(sent PATCH '/items/')"
 # NO `start:` KEY: the fallback, and the branch the story names.
 start_config
 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
-FALLBACK="story/the-start-command-s41"
+FALLBACK="story/the-start-command-41"
 check "with no start: command — exits 0" 0 "$RC"
 check "the branch is <kind>/<slug>-<shortid>" 1 \
   "$(git -C "$SRT" show-ref --verify --quiet "refs/heads/$FALLBACK" && echo 1 || echo 0)"
@@ -1009,8 +1036,8 @@ printf 'one\n' > "$SHP/apps/loopable/index.mjs"
 git -C "$SHP" add -A
 git -C "$SHP" commit -qm "the first commit"
 git -C "$SHP" remote add origin "$SHP_ORIGIN"
-git -C "$SHP" checkout -q -b feat/loopable-ship-s99
-git -C "$SHP" push -q -u origin feat/loopable-ship-s99
+git -C "$SHP" checkout -q -b feat/loopable-ship-99
+git -C "$SHP" push -q -u origin feat/loopable-ship-99
 SHIP_HEAD=$(git -C "$SHP" rev-parse HEAD)
 SDIR2="$SHP/.git/loopable"
 mkdir -p "$SDIR2"
@@ -1025,7 +1052,7 @@ ship_state
 C1=aaaaaaaa-1111-4111-8111-000000000001
 C2=bbbbbbbb-2222-4222-8222-000000000002
 ship_item() { cat > "$STUB_ITEM" <<JSON
-{"item":{"id":"$SHIP_ITEM","kind":"story","ref":"s99","title":"S2.5 · Ship the branch",
+{"item":{"id":"$SHIP_ITEM","kind":"story","ref":"99","title":"S2.5 · Ship the branch",
   "ask":"Finish an item in one command","status":"in_progress"},
  "brief":{"brief_rev":4,"ask":"Finish an item in one command","criteria":[
    {"id":"$C1","text":"The command refuses a dirty tree","verify":"manual","status":"open"},
@@ -1090,7 +1117,7 @@ run_ship --prepare
 check "a branch ahead of its upstream — refused" 1 "$RC"
 check "naming the push"                1 "$(shipped | grep -c 'git -C .* push')"
 check "and pushing nothing for you"    1 "$(shipped | grep -c 'never pushes')"
-git -C "$SHP" push -q origin feat/loopable-ship-s99
+git -C "$SHP" push -q origin feat/loopable-ship-99
 SHIP_HEAD=$(git -C "$SHP" rev-parse HEAD)
 
 echo
@@ -1164,7 +1191,7 @@ check "the screenshot rides the contract" 1 "$(printf '%s' "$P" | jq -r '.screen
 check "the cost is zero, not absent"   0 "$(printf '%s' "$P" | jq -r '.cost.tokens')"
 check "and it says the item moved itself" 1 "$(shipped | grep -c 'in_review')"
 check "the pull request is opened"     1 "$(shipped | grep -c 'https://github.com/')"
-check "its body names the item, by ref" 1 "$(grep -c '^Loopable: s99' "$STUB_PR_SENT")"
+check "its body names the item, by ref" 1 "$(grep -c '^Loopable: 99' "$STUB_PR_SENT")"
 check "and carries the criteria, ticked" 2 "$(grep -c '^- \[x\]' "$STUB_PR_SENT")"
 check "and the reviewer's last word"   1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_SENT")"
 check "the title comes from the item, without its code" 1 \

@@ -132,7 +132,7 @@ loopable_paths_phrase() {
 # `<id>\t<status>\t<title>\t<ref>` lines.
 #
 # THE REF IS THE FOURTH FIELD and rides along everywhere the first three go:
-# every caller of this function is a place a person might have written `s41`
+# every caller of this function is a place a person might have written `41`
 # instead of a uuid (S1.10), and a second fetch to translate one would be a
 # second answer to "what is in this backlog".
 loopable_items() {
@@ -174,8 +174,9 @@ loopable_refs() { # loopable_refs <pr body> -> one raw ref per line
     grep -viE '^none$'
 }
 # RESOLVED AGAINST THE BACKLOG, NEVER TRUSTED. A full id has to be an id this
-# token can actually see; a SHORT REF (s41, loop/s41) is looked up as the ref
-# the backlog itself hands back; a shorter string is a prefix, and a prefix
+# token can actually see; a SHORT REF (41, loop/41, and the legacy s41) is
+# looked up as the ref the backlog itself hands back; a shorter string is a
+# prefix, and a prefix
 # that matches two items resolves to nothing — the loopable_item tie rule, for
 # the same reason. Nothing here decides that an unresolved ref is fine: it
 # returns non-zero and the caller says what that means.
@@ -190,13 +191,19 @@ loopable_resolve_ref() { # loopable_resolve_ref <ref> [items tsv] -> an id
   id=$(printf '%s\n' "$items" | awk -F'\t' -v r="$ref" '$1 == r {print $1; exit}')
   [ -n "$id" ] && { printf '%s' "$id"; return; }
 
-  # A SHORT REF (S1.10): `s41`, `loop/s41` — the fourth field, which is what
-  # the backlog itself calls the row. The project key in front is stripped:
+  # A SHORT REF: `41`, `loop/41` — the fourth field, which is what the backlog
+  # itself calls the row. The project key in front is stripped:
   # `.loopable.yaml` already decides which project this repository talks to,
-  # and a key naming another one resolves to nothing here anyway. The letter
-  # is a hint about the kind; the number is the identity.
+  # and a key naming another one resolves to nothing here anyway.
+  #
+  # A LEADING LETTER IS ACCEPTED AND THEN DROPPED. Refs were spelled `s41`
+  # until 2026-09-08 and PR bodies and session notes written then are still
+  # read by this function; the number was always the identity, so stripping
+  # the letter is what makes an old ref go on meaning what it meant. The
+  # backlog now hands back the bare number, so the comparison is made on it.
   short=${ref##*/}
-  if printf '%s' "$short" | grep -qE '^[estbf][0-9]+$'; then
+  if printf '%s' "$short" | grep -qE '^[estbf]?[0-9]+$'; then
+    short=${short#[estbf]}
     id=$(printf '%s\n' "$items" |
       awk -F'\t' -v r="$short" 'tolower($4) == r {print $1; exit}')
     [ -n "$id" ] && { printf '%s' "$id"; return; }
@@ -324,7 +331,7 @@ loopable_slug() {
 #
 #   1. LOOPABLE_ITEM         somebody said so; nothing outranks that
 #   2. the state file        this session already worked it out
-#   3. the branch's short id  `<kind>/<slug>-<shortid>`, which is how
+#   3. the branch's ref       `<kind>/<slug>-<ref>`, which is how
 #                             /loopable:start (S2.4) will name branches
 #   4. the one in_progress item whose title matches the branch slug — the
 #      answer for the branches that exist today, `<type>/<app>-<slug>`
@@ -342,10 +349,12 @@ loopable_item() { # -> a work item id, or non-zero
   items=$(loopable_items) || return 1
   [ -n "$items" ] || return 1
 
-  # A REF, if the branch ends in one: `feat/loopable-brief-pack-s41`. First,
+  # A REF, if the branch ends in one: `feat/loopable-brief-pack-41`. First,
   # because it is the only step that is exact — a ref is a name somebody chose
-  # to put there, and the two steps under it are inference.
-  short=$(printf '%s' "$slug" | sed -nE 's|.*-([estbf][0-9]+)$|\1|p')
+  # to put there, and the two steps under it are inference. A letter in front
+  # is the pre-2026-09-08 spelling and still resolves; `loopable_resolve_ref`
+  # is the one place that knows what a ref may look like.
+  short=$(printf '%s' "$slug" | sed -nE 's|.*-([estbf]?[0-9]+)$|\1|p')
   if [ -n "$short" ]; then
     id=$(loopable_resolve_ref "$short" "$items") && [ -n "$id" ] &&
       { printf '%s' "$id"; return; }

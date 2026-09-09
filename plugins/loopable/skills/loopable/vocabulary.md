@@ -168,22 +168,26 @@ demonstration of it.
 
 ## Refs
 
-A ref is the short name of a work item or a feature: a letter for its kind and
-a number the project hands out once, like s41 or f7.
+A ref is the short name of a work item or a feature: a number the project hands
+out once, like 41 or 7.
 
 **When.** Whenever you need to name one thing to somebody else — in a chat, in
-a stand-up, in a branch name, in a PR body, in a note on an activity. Cite an
-item by its ref: `e` is an epic, `s` a story, `t` a task, `b` a bug and `f` a
-feature. Across projects, put the project key in front: `loop/s41`.
+a stand-up, in a branch name, in a PR body, in a note on an activity. Across
+projects, put the project key in front: `loop/41`.
 
 **Not when.** Not as a title. A ref says which thing, never what it is, so a
 sentence that is only refs is a sentence nobody can read.
 
 **Why.** One counter per project serves both planes, so the number alone names
-one thing and the letter is a free hint about what it is — which matters
-because the letter is what gets lost, in speech and in a search box. A number
-is never reused, so a ref written down a year ago still points where it
-pointed. The uuid is still there and still works; it is simply not a name.
+exactly one thing — a work item and a feature can never wear the same number,
+and there is nothing left for a letter to disambiguate. Refs used to carry one
+(`s41`, `f7`); it was a hint about the kind, and a hint that survives writing
+but not speech, a search box or the middle of a branch name is one more thing
+to get wrong. The old spellings are still understood wherever a ref is
+accepted, because a name that stops working is not a name; nothing writes them
+any more. A number is never reused, so a ref written down a year ago still
+points where it pointed. The uuid is still there and still works; it is simply
+not a name.
 
 ## States
 

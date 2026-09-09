@@ -252,7 +252,7 @@ check_pr() { # check_pr <n> -> prints a denial reason, or nothing
   # story having to know about the other.
   refs=$(loopable_refs "$body")
   if [ -z "$refs" ]; then
-    printf 'PR #%s touches %s and its body names no work item, so merging it would leave the Loopable backlog saying this was never done.\n\nAdd a line to the PR body:\n\n  Loopable: s41        (its short ref, or its uuid)\n\nand close its session with the payload before merging. If this genuinely has no item, say so on purpose:\n\n  Loopable: none — <why>\n\n%s\n' \
+    printf 'PR #%s touches %s and its body names no work item, so merging it would leave the Loopable backlog saying this was never done.\n\nAdd a line to the PR body:\n\n  Loopable: 41         (its short ref, or its uuid)\n\nand close its session with the payload before merging. If this genuinely has no item, say so on purpose:\n\n  Loopable: none — <why>\n\n%s\n' \
       "$pr" "$(loopable_paths_phrase)" "$OVERRIDE"
     return 0
   fi

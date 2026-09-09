@@ -50,8 +50,9 @@ what it had just done would cost a request per tool call and answer with a
 paraphrase of the transcript.
 
 **Which item is this branch?** Four answers, cheapest first: `LOOPABLE_ITEM`;
-the state file a previous hook wrote; a short id at the end of the branch name
-(`<kind>/<slug>-<shortid>`, which is how `/loopable:start` names them); or the
+the state file a previous hook wrote; a ref at the end of the branch name
+(`<kind>/<slug>-<ref>` — a plain number, which is how `/loopable:start` names
+them); or the
 one `in_progress` item sharing at least two words of at least three letters
 with the branch slug. **A tie resolves to nothing**, and so does everything
 else that does not resolve — an item guessed wrong writes one person's work
@@ -136,9 +137,14 @@ refused.
 ## Naming the item
 
 ```
+Loopable: 41
 Loopable: 4e90ea71-bc6a-445d-8517-f732d064a1f5
 Loopable: none — a platform change with nothing in the backlog yet
 ```
+
+The ref is a plain number and so is what a branch name carries. The letter refs
+used to wear (`s41`) still resolve here, because a PR body written before
+2026-09-08 has to go on meaning what it meant.
 
 `none` is an escape hatch on purpose, and a visible one: a stated exception can
 be argued with in review, and silence cannot.
@@ -197,8 +203,8 @@ did not cover.
   as either. `gh pr merge 9  # Loopable: <an in_review item>` has written a
   comment. And whatever follows `Loopable:` became opaque to the guard: one
   `lib.sh` pair harvests the string and resolves it against the backlog, so a
-  new spelling (short ids) composes with the sha rule without either knowing
-  about the other.
+  new spelling — short ids in S1.10, and plain numbers replacing them — composes
+  with the sha rule without either knowing about the other.
 
 The honest conclusion: guards written in shell against attacker-shaped input
 want adversarial review every time they change, not once.
