@@ -41,9 +41,20 @@ case "$*" in
   *"pr view"*"--json url"*)
     [ -s "${STUB_PR_URL:-/dev/null}" ] || exit 1
     cat "$STUB_PR_URL" ;;
-  *"pr create"*|*"pr edit"*)
+  # A `pr create` that FAILS is a path of its own since 256: the close happens
+  # anyway, naming no url. The fixture decides, because the host may or may
+  # not have a real gh and neither answer may be borrowed from it.
+  *"pr create"*)
+    if [ -s "${STUB_PR_FAIL:-/dev/null}" ]; then
+      cat "$STUB_PR_FAIL" >&2; exit 1
+    fi ;&
+  *"pr edit"*)
     f=$(body_file "$@")
     [ -n "$f" ] && cp "$f" "${STUB_PR_SENT:-/dev/null}"
+    # Recorded into the same log curl writes, so a case can assert that the
+    # pull request was opened BEFORE the close and not merely that both
+    # happened — which since S1.3+256 is the whole point of the order.
+    [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr\t\n' >> "$STUB_CALLS"
     printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
   *) exit 1 ;;
 esac
@@ -97,7 +108,12 @@ case "$U" in
   # is what decides whether a `not_run` verdict is honest.
   */items/*)       answer "$(cat "${STUB_ITEM:-/dev/null}")" ;;
   */activities)    answer '{"activity":{"id":"a-1"}}' 201 ;;
-  */sessions)      answer '{"session":{"id":"s-new"}}' 201 ;;
+  # OPENING CAN BE REFUSED: one open session per item (T1.12), and the 409
+  # names the session to resume. A fixture, because both answers are paths
+  # session-start.sh takes.
+  */sessions)
+    [ -s "${STUB_OPEN_ERR:-/dev/null}" ] && answer "$(cat "$STUB_OPEN_ERR")" "${STUB_OPEN_CODE:-409}"
+    answer '{"session":{"id":"s-new"}}' 201 ;;
   */sessions\?*)   answer "$(cat "${STUB_SESSIONS:-/dev/null}")" ;;
 esac
 exit 22
@@ -108,10 +124,13 @@ export STUB_FILES="$STUB/files" STUB_BODY="$STUB/body" STUB_ITEMS="$STUB/items"
 export STUB_SESSIONS="$STUB/sessions" STUB_CALLS="$STUB/calls"
 export STUB_HEAD="$STUB/head" STUB_ITEM="$STUB/item"
 export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
-export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent"
+export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
 export STUB_ATT_N="$STUB/attn" STUB_CLOSE_ERR="$STUB/closeerr"
-export STUB_CLOSE_CODE=
-: > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; printf '0' > "$STUB_ATT_N"
+export STUB_OPEN_ERR="$STUB/openerr"
+export STUB_CLOSE_CODE= STUB_OPEN_CODE=
+: > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"
+: > "$STUB_PR_FAIL"
+printf '0' > "$STUB_ATT_N"
 printf '{"sessions":[]}' > "$STUB_SESSIONS"; : > "$STUB_CALLS"
 printf '' > "$STUB_HEAD"; printf '{"item":{},"brief":{"criteria":[]}}' > "$STUB_ITEM"
 printf '{"pack":null}' > "$STUB_PACK"; printf '{"pack":null}' > "$STUB_NEXT"
@@ -589,6 +608,27 @@ rm -f "$SDIR/session"; : > "$STUB_CALLS"
 jq -nc '{sessions:[{id:"s-old",branch:"feat/somebody-else",harness:"claude-code"}]}' > "$STUB_SESSIONS"
 CTX=$(start)
 check "another branch's session is not resumed"    1 "$(printf '%s\n' "$CTX" | grep -c 's-new opened')"
+
+# ...UNTIL THE API SAYS SO. One open session per item (T1.12): the branch
+# match above is a guess made from a list, and the 409 is the answer. What it
+# names is what this window joins, however it was started.
+reset_state
+jq -nc '{error:"a session is already open on this item — Dana on feat/somebody-else. Resume it rather than opening a second",
+         session:{id:"s-theirs",branch:"feat/somebody-else",harness:"claude-code",member_name:"Dana"}}' \
+  > "$STUB_OPEN_ERR"
+CTX=$(start)
+check "a refused open resumes the session it names" 1 "$(printf '%s\n' "$CTX" | grep -c 's-theirs resumed')"
+check "and the id is kept for the other hooks"      s-theirs "$(state session)"
+check "the banner says whose it is"                 1 "$(printf '%s\n' "$CTX" | grep -c 'opened by Dana on feat/somebody-else')"
+check "the open was tried exactly once"             1 "$(posted /sessions$)"
+# ANY OTHER REFUSAL IS SILENCE, the fail-open rule: a 500 is not an invitation
+# to guess at a session id.
+: > "$STUB_CALLS"; rm -f "$SDIR/session"
+STUB_OPEN_CODE=500 CTX=$(STUB_OPEN_CODE=500 start)
+check "a 500 on open opens nothing and says nothing" none "${CTX:-none}"
+check "and nothing is written down"                  none "$(state session || echo none)"
+: > "$STUB_OPEN_ERR"; export STUB_OPEN_CODE=
+sess_items
 
 # --- which item is this branch -------------------------------------------
 reset_state
@@ -1190,7 +1230,16 @@ check "the screenshot rides the contract" 1 "$(printf '%s' "$P" | jq -r '.screen
 # zeros rather than a guess.
 check "the cost is zero, not absent"   0 "$(printf '%s' "$P" | jq -r '.cost.tokens')"
 check "and it says the item moved itself" 1 "$(shipped | grep -c 'in_review')"
-check "the pull request is opened"     1 "$(shipped | grep -c 'https://github.com/')"
+check "the pull request is opened"     1 "$(shipped | grep -c 'Opened https://github.com/')"
+# THE ORDER, WHICH IS THE STORY (256). The close is a session's one and only
+# write, so the url has to be in hand before it: `gh` runs, and the close
+# carrying its url runs after. A script that closed first could never record
+# the link at all, and nothing would be red about it except this line.
+check "opened BEFORE the session closed" 1 \
+  "$(awk -F'\t' '$1 == "GH" {g = NR} $2 ~ /\/close$/ {c = NR} END {print (g && c && g < c) ? 1 : 0}' "$STUB_CALLS")"
+check "and the close carries its url"  https://github.com/wearewebera/sanfrancisco/pull/700 \
+  "$(printf '%s' "$P" | jq -r '.pr_url')"
+check "the close line names it too"    1 "$(shipped | grep -c 'verdict pass, at https://github.com/')"
 check "its body names the item, by ref" 1 "$(grep -c '^Loopable: 99' "$STUB_PR_SENT")"
 check "and carries the criteria, ticked" 2 "$(grep -c '^- \[x\]' "$STUB_PR_SENT")"
 check "and the reviewer's last word"   1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_SENT")"
@@ -1236,11 +1285,36 @@ check "nor any pull request opened"    0 "$(grep -c . "$STUB_PR_SENT")"
 git -C "$SHP" checkout -q -- apps/loopable/index.mjs
 
 echo
+echo " no pull request — and the session still closes anyway:"
+# A verified run whose report is on the record is worth more than a tidy
+# failure, so a `gh pr create` that fails does not stop the close; it costs the
+# url and the exit code. `pr_url` is OMITTED rather than sent empty: absent
+# means "this close named none", and the API reads an empty string as neither
+# that nor a url.
+report pass met met
+printf 'could not create: no upstream configured\n' > "$STUB_PR_FAIL"
+run_ship --close
+: > "$STUB_PR_FAIL"
+check "gh pr create failing — exits non-zero" 1 "$RC"
+check "and says what gh said"          1 "$(shipped | grep -c 'no upstream configured')"
+check "and says the link cannot be added later" 1 "$(shipped | grep -c 'cannot be given the link afterwards')"
+P=$(closed_payload)
+check "the session is closed all the same" 1 "$(printf '%s\n' "$P" | grep -c .)"
+check "naming no pull request at all"  null "$(printf '%s' "$P" | jq -r '.pr_url // "null"')"
+check "and the body is left where a person can paste it" 1 "$(shipped | grep -c 'pr-body.md')"
+
+echo
 echo " the API refusing is said in the API's own words:"
 report pass met met
 printf '{"message":"the close contract is not complete — screenshot_ids"}' > "$STUB_CLOSE_ERR"
 run_ship --close
 check "a 422 is printed, not swallowed" 1 "$(shipped | grep -c 'close contract is not complete')"
+# THE PULL REQUEST SURVIVES A REFUSED CLOSE, which is the edge the old order
+# had backwards: it used to close first and could leave an item in_review with
+# no pull request, and now the worst case is a pull request with no close —
+# which a second `--close` finds and finishes.
+check "the pull request is open anyway" 1 "$(grep -c '^Loopable: 99' "$STUB_PR_SENT")"
+check "and the model is told to run it again" 1 "$(shipped | grep -c 'ship again')"
 # AND THE STATUS SURVIVES THE SUBSHELL. Every call is `x=$(api ...)`, so a
 # status kept in a variable would be gone by the time the caller read it — and
 # the 404 sentence, which is the one a second `--close` sees, would never print.

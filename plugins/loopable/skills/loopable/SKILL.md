@@ -41,6 +41,12 @@ the work came from**, not how much anybody is trusted: our own decided work
 goes in the backlog, an outside ask goes in the queue. Routing everything
 through the queue would not add a safeguard, it would add a rubber stamp.
 
+`write_brief` draws the same line and needs no decision from you: on a studio
+token the spec is written straight onto the item, and a caller from outside
+the studio has it proposed for a person to accept. The tool tries the direct
+path, falls back to the queue if the API refuses it, and its result says which
+happened — read that before assuming somebody has to accept anything.
+
 ## Starting work: pull the pack first
 
 Before writing anything, `pull_item` on the item you are about to build (or
@@ -65,7 +71,10 @@ look an id up by title when you need one. The item's own id is the one that
 goes in `report_progress` and in `Loopable: <id>` in the PR body.
 
 **Pulling is not claiming.** `next_ready` is a read; two harnesses asking at
-once are told the same item. What claims it is `/loopable:start`:
+once are told the same item. What claims it is `/loopable:start`, and the
+claim is exclusive: an item carries at most one open session, so opening a
+second on it is a 409 naming the first — the session hook resumes that one
+rather than running beside it.
 
 ```
 /loopable:start <item id | ref | next>

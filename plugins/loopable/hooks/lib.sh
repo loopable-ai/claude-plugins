@@ -53,6 +53,26 @@ loopable_post() { # loopable_post <path> <json body> -> body on stdout, non-zero
     --data-binary "$2" "$LOOPABLE_API$1" 2>/dev/null
 }
 
+# The write half that KEEPS A REFUSAL.
+#
+# `loopable_post` above uses `curl -f`, which throws the body away along with
+# the status — right for a hook that has nothing to say about a failure, and
+# wrong for the ONE refusal a hook can act on: the 409 from opening a session
+# on an item somebody already has open (T1.12). That answer NAMES the session
+# to resume, in fields rather than in a sentence, and a caller that never sees
+# the body cannot resume anything.
+#
+# Body first, status on the LAST line — `bin/ship.sh`'s arrangement, so there
+# is one shape of "the answer, and what it was". Still silent, still short: an
+# unreachable API is a non-zero return and nothing printed.
+loopable_post_reply() { # loopable_post_reply <path> <json body> -> <body>\n<status>
+  local token; token=$(loopable_token) || return 1
+  [ -n "$token" ] || return 1
+  curl -sS --max-time "$LOOPABLE_MAX_TIME" -X POST -w '\n%{http_code}' \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    --data-binary "$2" "$LOOPABLE_API$1" 2>/dev/null
+}
+
 # The third verb, because reporting progress is a PATCH and nothing else here
 # needed one: `report_progress` in the MCP is `PATCH /items/{id}` with a status
 # and a note, and bin/start.sh takes that same edge when it claims an item.

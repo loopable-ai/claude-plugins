@@ -14,6 +14,14 @@
 # ghosts and the stall detector into a liar. So the existing open session for
 # (item, this branch, claude-code) wins, and a new one is the fallback.
 #
+# AND RESUME BY ITEM WHEN THE OPEN REFUSES (T1.12). The branch match above is
+# a guess made from a list; the API's 409 is the ANSWER, and it names the
+# session already open on this item — whatever branch or harness it was
+# started from. So an open that is refused resumes what it was refused for,
+# which is what turns "somebody already has this" from a dead end into the
+# thing to join. Two windows on two worktrees of one item are the case: one
+# session, and the second window reports into it rather than beside it.
+#
 # NO MODEL CALL, and no node. Two curls at worst, four seconds each, and
 # session start is not held up by anything else.
 #
@@ -52,12 +60,33 @@ SESSION=$(loopable_get \
     'first(.sessions[]? | select(.branch == $b and .harness == $h) | .id) // empty') || SESSION=""
 
 VERB=resumed
+NOTE=""
 if [ -z "$SESSION" ]; then
   VERB=opened
   BODY=$(jq -nc --arg i "$ITEM" --arg h "$HARNESS" --arg r "$REPO_NAME" --arg b "$BRANCH" \
     '{item_id: $i, harness: $h, repo: $r, branch: $b}') || exit 0
-  SESSION=$(loopable_post "/agent/projects/$PROJECT/sessions" "$BODY" |
-    jq -r '.session.id // empty') || exit 0
+  REPLY=$(loopable_post_reply "/agent/projects/$PROJECT/sessions" "$BODY") || exit 0
+  CODE=$(printf '%s\n' "$REPLY" | tail -1)
+  ANSWER=$(printf '%s\n' "$REPLY" | sed '$d')
+  case "$CODE" in
+    2*)
+      SESSION=$(printf '%s' "$ANSWER" | jq -r '.session.id // empty') || exit 0 ;;
+    409)
+      # SOMEBODY ELSE HAS IT OPEN — and the answer says which session, in
+      # fields. Read as fields and never out of the sentence: a hook that
+      # parsed the English would break the day somebody improved it.
+      SESSION=$(printf '%s' "$ANSWER" | jq -r '.session.id // empty') || exit 0
+      [ -n "$SESSION" ] || exit 0
+      VERB=resumed
+      # THROUGH THE SANITIZER, like every other piece of backlog text that
+      # reaches a session: a member name and a branch are strings somebody
+      # else chose, and this line goes straight into an agent's context.
+      WHO=$(loopable_safe "$(printf '%s' "$ANSWER" | jq -r '.session.member_name // "somebody"')")
+      ON=$(loopable_safe "$(printf '%s' "$ANSWER" | jq -r '.session.branch // empty')")
+      NOTE="It was opened by ${WHO:-somebody}${ON:+ on $ON} — one session per"
+      NOTE="$NOTE item, so this window reports into that one." ;;
+    *) exit 0 ;;
+  esac
 fi
 [ -n "$SESSION" ] || exit 0
 
@@ -68,7 +97,9 @@ loopable_state_put session "$SESSION"
 rm -f "$STATE/actions" 2>/dev/null
 
 jq -nc --arg c "Loopable — session $SESSION $VERB on item $ITEM (branch $BRANCH).
-
+${NOTE:+
+$NOTE
+}
 Activity is reported for you: a summary when this session stops, an 'action'
 line per batch of tool calls, and the PR when one is created. You do not need
 to call post_activity for those. Post one yourself when something happened

@@ -1,5 +1,5 @@
 ---
-description: Finish a Loopable item — check the branch, run the verifier and the reviewer, post the close contract, open the pull request naming the item.
+description: Finish a Loopable item — check the branch, run the verifier and the reviewer, open the pull request naming the item, close the session with the contract and that url.
 argument-hint: "[nothing]"
 ---
 
@@ -45,11 +45,13 @@ works, and do not edit what they return. A report you corrected is your report.
 ```
 
 It reads the two reports, attaches them and the screenshots to the Loopable
-session, posts the close contract — brief revision, HEAD sha, verdict and reason,
-every criterion with where it landed and whether it is met, the screenshot ids
-and the cost — and opens the pull request with the criteria checklist and
-`Loopable: <ref>` in its body. The close moves the item to `in_review` by itself:
-**do not report progress again afterwards.**
+session, opens the pull request with the criteria checklist and `Loopable: <ref>`
+in its body, and then closes the session with the contract — brief revision,
+HEAD sha, verdict and reason, every criterion with where it landed and whether
+it is met, the screenshot ids, the cost, and that pull request's url. The pull
+request comes first because a closed session is never updated again, so the
+close is the only moment the link can be recorded. The close moves the item to
+`in_review` by itself: **do not report progress again afterwards.**
 
 Pass `--trailer '<line>'` when this harness has a session link the repository
 puts at the end of a pull request body; it becomes the last line.

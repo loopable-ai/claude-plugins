@@ -24,7 +24,7 @@ description: |
   <example>
   Context: A change to a repository with written doctrine
      user: "/loopable:ship"
-     assistant: "The reviewer reads the repository's CLAUDE.md first and checks the diff against the rules it states, not against generic style."
+     assistant: "The reviewer reads the repository's AGENTS.md first and checks the diff against the rules it states, not against generic style."
      <commentary>
         A project's own written rules are the review standard. Inventing a house style over the top of them is noise.
      </commentary>
@@ -87,7 +87,7 @@ Then read, before judging anything:
 - **The item and its acceptance criteria**, from what `--prepare` printed. They
   say what the change is *for*. You do not verify them; you check the diff stays
   inside them.
-- **The repository's own `CLAUDE.md`**, root and nearest — and any doctrine file
+- **The repository's own `AGENTS.md`**, root and nearest — and any doctrine file
   it points at. Its rules are the review standard. In this repository that
   means things like: one statement per multi-step write, authorization declared
   as data rather than restated in a handler, no model call inside a request, a

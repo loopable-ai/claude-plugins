@@ -7,12 +7,14 @@
 #    activity, immediately, with the url and the number in `ref` so anything
 #    reading the stream can link straight to it.
 #
-#    IT IS AN ACTIVITY, NOT A COLUMN. `agent_sessions` has no `pr_url` — S1.2
-#    gave it item, member, harness, repo, branch and the close contract, and
-#    nothing else — so there is no field to set and inventing one for a hook
-#    would be a migration in service of a convenience. `ref` is exactly the
-#    jsonb "what this activity points at" that S1.2 put there, and the item is
-#    already the session's own.
+#    IT IS AN ACTIVITY, AND THE COLUMN IS THE CLOSE'S. `agent_sessions` grew a
+#    `pr_url` (20260909130000), and it is written by the close and only by the
+#    close — one write per ending is what makes a close worth trusting, and a
+#    hook cannot close anything. So this stays what it always was: the moment
+#    the work became reviewable, recorded while the session is still running,
+#    in the jsonb `ref` that S1.2 put there for exactly this. The accept seat
+#    reads the column first and falls back to these refs, so a run that opened
+#    a pull request and closed without naming one still shows its link.
 #
 # 2. EVERYTHING ELSE IS BATCHED. A line per tool call would be a session with
 #    four hundred activities and one HTTP request per keystroke-sized action,

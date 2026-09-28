@@ -18,20 +18,24 @@
 #            previous run, and prints the pack, the HEAD sha and the exact
 #            shape the two reports must have.
 # --close    reads the two reports, uploads them and the screenshots as
-#            attachments on the session, posts the close contract, opens the
-#            pull request naming the item, and says what moved.
+#            attachments on the session, opens the pull request naming the
+#            item, closes the session with the contract AND that url, and says
+#            what moved.
 #
 # A COMMAND IS NOT A HOOK. Every failure here prints a sentence and exits
 # non-zero — somebody typed this and is waiting for a pull request. The
 # timeout grows for the same reason (LOOPABLE_MAX_TIME in lib.sh).
 #
-# NOTHING IS EVER UNDONE, and this one has a sharper edge than start.sh: once
-# the close is posted the item has MOVED, and a `gh pr create` that fails
-# afterwards leaves an item in `in_review` with no pull request. That is
-# recoverable by hand and by running `--close` again (the second close is a
-# 404 and the script says so while still opening the PR); a script that tried
-# to reopen a closed session would be inventing a state the API refuses on
-# purpose.
+# NOTHING IS EVER UNDONE, which is why the PULL REQUEST IS OPENED BEFORE THE
+# CLOSE. The close is a session's one and only write — `closed_at IS NULL` in
+# its WHERE is what makes a second close a 404 rather than a rewrite — so the
+# url has to be in hand before it, and there is deliberately no route that adds
+# one afterwards. Doing it this way also retires the edge the old order had: a
+# `gh pr create` failing after the close used to leave an item in `in_review`
+# with no pull request and nowhere to record one. Now a failure there is
+# survivable in both directions — the close still happens, naming no url, and a
+# second `--close` finds the pull request that already exists and closes with
+# it, if the first close was the thing that failed.
 #
 # A `fail` VERDICT STILL CLOSES. The contract wants the truth, and a harness
 # that only reported successes would be a harness whose reports mean nothing.
@@ -414,40 +418,27 @@ $(jq -r '[.criteria[]?.screenshot // empty] | unique | .[]' "$VERIFY_JSON")
 EOF
 say
 
-# ---------------------------------------------------------- the contract --
-SUMMARY="verifier $VERDICT at $SHORT"
-[ -n "$REASON" ] && SUMMARY="$SUMMARY — $REASON"
-PAYLOAD=$(jq -nc \
-  --argjson rev "${BRIEF_REV:-0}" --arg sha "$HEAD_SHA" \
-  --arg v "$VERDICT" --arg r "$REASON" --arg s "$SUMMARY" \
-  --argjson c "$CRITERIA" --argjson shots "$SHOTS" --argjson cost "$COST" \
-  '{state: "complete", summary: $s, brief_rev: $rev, head_sha: $sha,
-    verdict: $v, verdict_reason: $r, criteria: $c,
-    screenshot_ids: $shots, cost: $cost}')
-
-CLOSED=1
-OUT=$(api POST "/agent/projects/$PROJECT/sessions/$SESSION/close" "$PAYLOAD") || CLOSED=0
-if [ "$CLOSED" = 1 ]; then
-  say "Closed session $SESSION at $SHORT — verdict $VERDICT."
-  # THE CLOSE IS THE REPORT. api/lib/sessions.mjs moves the item to in_review
-  # in the same statement, through the transitions table. A report_progress
-  # afterwards would be a second write saying what the first one already said,
-  # and the day they disagree the item is the one that is wrong.
-  say "The item moved to in_review with it — no separate progress report is needed."
-else
-  say "The close was refused: $(api_message "$OUT")" >&2
-  case "$(api_code)" in
-    404) say "That session is not open — it was closed already, or belongs to another project." >&2 ;;
-  esac
-  say "Continuing to the pull request: the branch is pushed and the reports are attached," >&2
-  say "so the work is visible. Fix the refusal above and run /loopable:ship again." >&2
+# ---------------------------------------- the pull request, BEFORE the close --
+#
+# THE ORDER USED TO BE THE OTHER WAY ROUND, and the header above still carries
+# the edge it had: a `gh pr create` that failed after the close left an item in
+# `in_review` with a session claiming work nobody could review. Since the close
+# contract takes a `pr_url` (20260909130000), the order that records the link
+# is the order that also removes that edge — open the pull request, then close
+# WITH it. A closed session is never updated again, so this is the only moment
+# the link can be written, and the script has to be arranged around that rather
+# than the schema arranged around the script.
+#
+# NOTHING HERE IS FATAL. If gh is missing, or `pr create` fails, the session
+# still closes — with no url, which is exactly what "this close named none"
+# means — because a verified run whose report is on the record is worth more
+# than a tidy failure. What the script does then is say so and exit non-zero
+# at the end.
+PR_URL=""
+PR_TROUBLE=""
+if ! command -v gh >/dev/null 2>&1; then
+  PR_TROUBLE="gh is not on PATH, so the pull request cannot be opened from here."
 fi
-say
-
-# --------------------------------------------------------- the pull request --
-command -v gh >/dev/null 2>&1 || die \
-  "gh is not on PATH, so the pull request cannot be opened from here. The session
-is closed; open the PR by hand and put \`Loopable: $ITEM\` in its body."
 
 # The item, as a person reads it. The leading code — "S2.5 · " — is dropped:
 # the short ref is already in the body and a title saying it twice is noise.
@@ -491,33 +482,81 @@ BODY="$STATE/pr-body.md"
   [ -n "$TRAILER" ] && printf '\n%s\n' "$TRAILER"
 } > "$BODY"
 
-PR_URL=$(gh pr view --json url -q .url 2>/dev/null) || PR_URL=""
-if [ -n "$PR_URL" ]; then
-  gh pr edit --body-file "$BODY" >/dev/null 2>&1 ||
-    say "The pull request body could not be updated; it is at $BODY." >&2
-  say "Updated $PR_URL"
-else
-  # The exit code is what decides, so the output goes to a file rather than
-  # through a pipe — `| tail -1` would report tail's success as gh's.
-  if gh pr create --title "$PR_TITLE" --body-file "$BODY" > "$STATE/pr-out" 2>&1; then
-    PR_URL=$(grep -oE 'https://[^[:space:]]+' "$STATE/pr-out" | tail -1)
-    say "Opened ${PR_URL:-the pull request}"
+# The body is built whether or not gh is here — it is what a person opening the
+# pull request by hand pastes, and $BODY is named in the refusal below.
+if [ -z "$PR_TROUBLE" ]; then
+  PR_URL=$(gh pr view --json url -q .url 2>/dev/null) || PR_URL=""
+  if [ -n "$PR_URL" ]; then
+    gh pr edit --body-file "$BODY" >/dev/null 2>&1 ||
+      say "The pull request body could not be updated; it is at $BODY." >&2
+    say "Updated $PR_URL"
   else
-    die "gh pr create failed:
+    # The exit code is what decides, so the output goes to a file rather than
+    # through a pipe — `| tail -1` would report tail's success as gh's.
+    if gh pr create --title "$PR_TITLE" --body-file "$BODY" > "$STATE/pr-out" 2>&1; then
+      PR_URL=$(grep -oE 'https://[^[:space:]]+' "$STATE/pr-out" | tail -1)
+      say "Opened ${PR_URL:-the pull request}"
+    else
+      PR_TROUBLE="gh pr create failed:
 
-$(cat "$STATE/pr-out")
-
-The session is closed and the reports are attached. Open the pull request by hand
-with \`Loopable: ${REF:-$ITEM}\` in its body."
+$(cat "$STATE/pr-out")"
+    fi
   fi
 fi
+if [ -n "$PR_TROUBLE" ]; then
+  say "$PR_TROUBLE" >&2
+  say "Closing anyway, with no pull request url: the run is verified and the reports" >&2
+  say "belong on the record. Open the PR by hand with \`Loopable: ${REF:-$ITEM}\` in its" >&2
+  say "body — the close cannot be given the link afterwards, and nothing pretends it can." >&2
+  say "The body is written for you at $BODY." >&2
+fi
 say
+
+# ---------------------------------------------------------- the contract --
+SUMMARY="verifier $VERDICT at $SHORT"
+[ -n "$REASON" ] && SUMMARY="$SUMMARY — $REASON"
+# pr_url is OMITTED, not sent empty, when there is no pull request: the API
+# takes an absent field as "this close named none" and a malformed one as a
+# 422, and an empty string is neither of those things to look at.
+PAYLOAD=$(jq -nc \
+  --argjson rev "${BRIEF_REV:-0}" --arg sha "$HEAD_SHA" \
+  --arg v "$VERDICT" --arg r "$REASON" --arg s "$SUMMARY" --arg pr "$PR_URL" \
+  --argjson c "$CRITERIA" --argjson shots "$SHOTS" --argjson cost "$COST" \
+  '{state: "complete", summary: $s, brief_rev: $rev, head_sha: $sha,
+    verdict: $v, verdict_reason: $r, criteria: $c,
+    screenshot_ids: $shots, cost: $cost}
+   + (if $pr == "" then {} else {pr_url: $pr} end)')
+
+CLOSED=1
+OUT=$(api POST "/agent/projects/$PROJECT/sessions/$SESSION/close" "$PAYLOAD") || CLOSED=0
+if [ "$CLOSED" = 1 ]; then
+  say "Closed session $SESSION at $SHORT — verdict $VERDICT${PR_URL:+, at $PR_URL}."
+  # THE CLOSE IS THE REPORT. api/lib/sessions.mjs moves the item to in_review
+  # in the same statement, through the transitions table. A report_progress
+  # afterwards would be a second write saying what the first one already said,
+  # and the day they disagree the item is the one that is wrong.
+  say "The item moved to in_review with it — no separate progress report is needed."
+else
+  say "The close was refused: $(api_message "$OUT")" >&2
+  case "$(api_code)" in
+    404) say "That session is not open — it was closed already, or belongs to another project." >&2 ;;
+  esac
+  say "The pull request is open and the reports are attached, so the work is visible." >&2
+  say "Fix the refusal above and run /loopable:ship again — the second run finds the" >&2
+  say "same pull request and closes with it." >&2
+fi
+say
+
 
 if [ "$VERDICT" != pass ]; then
   say "The verdict is $VERDICT, so this is not mergeable yet: $REASON"
   say "Fix what the report names, commit, push, and run /loopable:ship again — the"
   say "close is bound to a commit, and a branch that moved after it was checked is a"
   say "branch nobody checked."
+  exit 1
+fi
+if [ -n "$PR_TROUBLE" ]; then
+  say "The session is closed and verified, but no pull request was opened from here."
   exit 1
 fi
 say "Shipped. A person reviews the diff and the verdict, and merges."

@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: |
-  USE WHEN a branch working a Loopable item claims to be done and needs black-box acceptance against the item's acceptance criteria, before the close contract is posted and the pull request is opened. The verifier uses the running thing the way its user would and reports per criterion with evidence; it never reads the implementation as proof, and it never edits anything. Dispatched by /loopable:ship, between `ship.sh --prepare` and `ship.sh --close`.
+  USE WHEN a branch working a Loopable item claims to be done and needs black-box acceptance against the item's acceptance criteria, before the pull request is opened and the close contract is posted. The verifier uses the running thing the way its user would and reports per criterion with evidence; it never reads the implementation as proof, and it never edits anything. Dispatched by /loopable:ship, between `ship.sh --prepare` and `ship.sh --close`.
 
   <example>
   Context: A screen was built on a story branch
@@ -102,7 +102,7 @@ You verify what runs. Look, in this order, and stop at the first that works:
    that sha is not the HEAD you were given, that environment is *not* this
    branch and cannot verify it.
 2. **A local server this repository documents** — a `## Running` section in
-   `CLAUDE.md`, a `RUN.md`, the README's development section, then the package
+   `AGENTS.md`, a `RUN.md`, the README's development section, then the package
    manifests (`package.json` scripts, `Makefile`, `docker-compose.yml`,
    `Procfile`). Use a `PORT` override when the project supports one, so your run
    does not collide with another worktree's.

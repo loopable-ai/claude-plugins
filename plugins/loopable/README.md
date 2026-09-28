@@ -39,7 +39,9 @@ on a `loopable-plugin-v<version>` tag whose version matches the manifest.
 
 The token is read from `~/.config/loopable/token` (or `LOOPABLE_TOKEN`, or
 `LOOPABLE_TOKEN_FILE`) — the same file the MCP server reads. Nothing in the
-plugin holds a secret.
+plugin holds a secret. A studio admin mints one in **Studio settings →
+Tokens**, where it is shown once; see [the MCP server's README](../mcp/) for
+the two lines that put it in place.
 
 ## The session, reported while it happens
 
@@ -66,9 +68,10 @@ list of ghosts and the stall detector into a liar.
 
 **PostToolUse batches.** A `gh pr create` whose *output* carried a pull request
 url is an event and gets its own activity immediately, with the url, the number
-and the item in `ref` — `agent_sessions` has no `pr_url` column, and inventing
-one for a hook would be a migration in service of a convenience, so the link is
-an activity where the schema already says "what this points at". Everything else
+and the item in `ref`. The session row has a `pr_url` of its own now, but it is
+the CLOSE's to write and only at close — a hook watching a tool call cannot
+close anything — so the activity is still how a pull request opened mid-run
+becomes visible while the run is still going. Everything else
 appends **one line to a file and makes no request at all**, posted as a single
 `action` activity at ten lines or five minutes, whichever comes first. Per-call
 activities would be a session with four hundred rows and a bill to match.
@@ -328,17 +331,22 @@ sometimes not:
    seventh register for this (`session`), because a run's exhaust is not a
    knowledge register: the session already is the row for "this run, on this
    item, at this sha".
-3. **Posts the close contract**: brief revision, HEAD sha, verdict and reason,
-   every criterion with where it landed and whether it is met, the screenshot
-   ids, the cost. `not_met` is recorded as `skipped` — the only two endings a
-   close may write — with the words "not met" carried into `implemented_at`
-   where a person will read them. **The cost is zeros unless something wrote a
-   `cost` file into the state directory**, because no hook here is handed a
-   token count and a guessed number is worse than an honest zero.
-4. **Opens the pull request**, titled from the item and bodied with the ask, the
+3. **Opens the pull request**, titled from the item and bodied with the ask, the
    criteria as a ticked checklist, the verdict, the reviewer's last line and
    `Loopable: <ref>`. `--trailer '<line>'` appends a harness's own session link;
-   a script cannot know one.
+   a script cannot know one. **Before the close, and that order is deliberate**:
+   the close takes the url and a closed session is never updated again, so this
+   is the only moment the link can be recorded. It also means a `gh` that fails
+   costs the url and the exit code rather than leaving an item in `in_review`
+   with no pull request, which is what the old order could do.
+4. **Posts the close contract**: brief revision, HEAD sha, verdict and reason,
+   every criterion with where it landed and whether it is met, the screenshot
+   ids, the cost, and the pull request url when there is one. `not_met` is
+   recorded as `skipped` — the only two endings a close may write — with the
+   words "not met" carried into `implemented_at` where a person will read them.
+   **The cost is zeros unless something wrote a `cost` file into the state
+   directory**, because no hook here is handed a token count and a guessed
+   number is worse than an honest zero.
 5. **Says the item moved by itself.** A complete close writes `in_review` in the
    same statement, through the transitions table. A `report_progress` afterwards
    would be a second write saying what the first already said, and the day they
