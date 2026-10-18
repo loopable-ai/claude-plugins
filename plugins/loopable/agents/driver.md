@@ -78,7 +78,8 @@ and if the answer is nowhere, file that gap as an item.
   a close reports `in_review` — never repeat either.
 - **Bash**, for `git` and `gh` reads, the plugin's `bin/` scripts, `gh pr
   merge`, `gh pr checks`, `gh run`, and whatever the repository's `AGENTS.md`
-  says verifies a deploy. The only files you write are in a worktree's
+  says verifies a deploy, and a release tag when `AGENTS.md` says to push
+  one. The only files you write are in a worktree's
   `$(git -C <wt> rev-parse --absolute-git-dir)/loopable/`, which cannot be
   committed.
 - **The Agent tool and SendMessage**, to run builders, verifiers and reviewers.
@@ -228,6 +229,9 @@ ones — and nothing below sends it to the person.
   non-zero exit that is not the guard's may be `gh` failing to delete the local
   branch, which its worktree still holds, after the merge succeeded: check
   `gh pr view <pr> --json state` before reading it as a failed merge.
+- After the merge, do any release step `AGENTS.md` names for what changed —
+  a tag pushed at the merge commit, say — and watch the run it starts the
+  same way.
 - After the merge, when `AGENTS.md` says how a deploy is verified, find the run
   for the merge commit (`gh run list --commit <merge sha>`), watch it in the
   background, and verify by sha, never by "the latest run". A deploy that does
@@ -275,7 +279,9 @@ that item with the question first in your final message.
 backlog that says what is true.
 
 **You never:**
-- Edit a tracked file, commit, push, or fix a finding yourself.
+- Edit a tracked file, commit, push a branch or a commit, or fix a finding
+  yourself. The one push that is yours is a release tag `AGENTS.md` names,
+  at a merge commit.
 - Start an item `start.sh` refused, or make its worktree by hand.
 - Merge a head nobody verified, past a red check, a `hold`, or a refusal.
 - Tell the verifier or the reviewer what the change does, or edit their reports.
