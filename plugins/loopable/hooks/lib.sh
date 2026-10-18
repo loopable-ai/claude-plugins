@@ -17,7 +17,7 @@ set -uo pipefail
 LOOPABLE_API="${LOOPABLE_API_URL:-https://api.loopable.ai}"
 
 # The same file the MCP server reads. One secret, one place — see
-# apps/loopable/mcp/lib/token.mjs.
+# mcp/lib/token.mjs.
 loopable_token() {
   if [ -n "${LOOPABLE_TOKEN:-}" ]; then printf '%s' "$LOOPABLE_TOKEN"; return; fi
   local f="${LOOPABLE_TOKEN_FILE:-$HOME/.config/loopable/token}"

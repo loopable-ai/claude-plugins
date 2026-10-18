@@ -1324,4 +1324,49 @@ check "a 404 says the session is already closed" 1 "$(shipped | grep -c 'closed 
 : > "$STUB_CLOSE_ERR"
 
 echo
+echo " the agents say who they are, and the checkers cannot edit:"
+AGENTS="$HERE/../agents"
+# The frontmatter alone: the lines between the first two `---`.
+fm() { awk 'NR == 1 && $0 == "---" {f = 1; next} f && $0 == "---" {exit} f' "$1"; }
+tools_of() { fm "$1" | sed -n 's/^tools: //p' | tr ',' '\n' | tr -d ' '; }
+for a in driver builder verifier reviewer; do
+  check "agents/$a.md is named $a"  "$a" "$(fm "$AGENTS/$a.md" 2>/dev/null | sed -n 's/^name: //p')"
+  check "and says when to use it"   1    "$(fm "$AGENTS/$a.md" 2>/dev/null | grep -c '^description: ')"
+done
+# NO EDITOR, AND THAT IS STRUCTURAL: naming a gap and patching it are two jobs.
+# A missing `tools:` line means every tool, editors included, so it is a
+# failure of its own rather than an empty list that passes.
+for a in verifier reviewer; do
+  T=$(tools_of "$AGENTS/$a.md")
+  check "the $a lists its tools"     yes  "$([ -n "$T" ] && echo yes || echo no)"
+  check "and no editor is among them" none \
+    "$(printf '%s\n' "$T" | grep -xE 'Edit|Write|MultiEdit|NotebookEdit' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+done
+# THE DRIVER JUDGES, so it has no editor either. It keeps every other tool —
+# it needs Agent, SendMessage and an MCP whose tool names differ between a
+# plugin install and a project .mcp.json — so its editors are taken away by
+# name rather than its tools listed.
+D=$(fm "$AGENTS/driver.md" | sed -n 's/^disallowedTools: //p' | tr ',' '\n' | tr -d ' ')
+check "the driver is denied every editor" "Edit MultiEdit NotebookEdit Write" \
+  "$(printf '%s\n' Edit Write MultiEdit NotebookEdit | while read -r t; do
+       printf '%s\n' "$D" | grep -qx "$t" || continue; printf '%s\n' "$t"; done | sort | tr '\n' ' ' | sed 's/ $//')"
+# The builder edits; it does not report on its own work or spawn its checkers.
+T=$(tools_of "$AGENTS/builder.md")
+check "the builder lists its tools"  yes "$([ -n "$T" ] && echo yes || echo no)"
+check "with no backlog and no agents" none \
+  "$(printf '%s\n' "$T" | grep -E '^(mcp__|Agent$|Task$|SendMessage$)' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+# THE DRIVER IS PROSE ABOUT SCRIPTS AND AGENTS, and prose does not fail when a
+# script is renamed. Every bin/, commands/ and loopable: name it uses must exist.
+MISSING=$(
+  grep -oE '(bin/[a-z-]+\.sh|commands/[a-z-]+\.md)' "$AGENTS/driver.md" | sort -u |
+    while read -r p; do [ -f "$HERE/../$p" ] || printf '%s ' "$p"; done
+  grep -oE 'loopable:[a-z-]+' "$AGENTS/driver.md" | sort -u | sed 's/^loopable://' |
+    while read -r n; do
+      [ -f "$AGENTS/$n.md" ] || [ -f "$HERE/../commands/$n.md" ] || printf 'loopable:%s ' "$n"
+    done
+)
+MISSING=${MISSING% }
+check "every script and agent the driver names exists" none "${MISSING:-none}"
+
+echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; exit 1; fi

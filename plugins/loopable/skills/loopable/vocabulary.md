@@ -1,7 +1,7 @@
 <!--
 THE ONE COPY. Edit this file and nothing else, then run:
 
-    apps/loopable/bin/sync-vocabulary.mjs
+    bin/sync-vocabulary.mjs
 
 which writes the byte-identical copies the code actually reads — api/lib/
 vocabulary.md (the container image only carries what is under api/), plugin/
@@ -16,11 +16,12 @@ sentence so a client can read it on its own.
 
 # The words we use
 
-Loopable has six words for the shape of work and five for the machinery
-around it. They are worth defining once because four readers use them at
-once — the product owner writing a backlog, a person reading a roadmap, a
-coding agent picking something up, and a client asking what is going on —
-and a word that means four things is a word nobody can plan with.
+Loopable has six words for the shape of work, seven for what the product owner
+proposes, escalates and remembers, and five for the machinery around it. They
+are worth defining once because four readers use them at once — the product
+owner writing a backlog, a person reading a roadmap, a coding agent picking
+something up, and a client asking what is going on — and a word that means
+four things is a word nobody can plan with.
 
 Two planes run through all of it. **Features are the nouns**: the surfaces of
 the product, which are never finished. **Work items are the verbs**: the
@@ -108,8 +109,8 @@ placed somewhere in it.
 
 ## Decision
 
-A decision is a commitment with a reason attached, written down once and
-changed only by superseding it.
+A decision is a choice the project has made, with its reason attached, written
+down once and changed only by superseding it.
 
 **When.** Whenever the answer to "why is it like this?" would otherwise live
 in somebody's memory or a chat thread.
@@ -120,6 +121,125 @@ in somebody's memory or a chat thread.
 past, and the reason to keep them is precisely that the past can be read
 back: the product owner recites the ones that still stand, and a superseded
 row stays visible as history.
+
+## Draft
+
+A draft is a proposal waiting in the approval queue, which becomes real only
+when a person at the studio accepts it.
+
+**When.** Whenever the product owner wants to change what the project holds:
+a requirement somebody asked for, a decision somebody made out loud, a brief,
+a commitment, a RAID entry, a piece of evidence, two items that are the same
+work, an item that has gone quiet. Coding agents and members propose the same
+way when the change is somebody else's to agree to.
+
+**Not when.** Not for work the studio has already decided to do; a member
+files that directly.
+
+**Why.** The product owner never writes the plan or the registers itself. It
+proposes, and a person accepts, rewords or declines with a reason. A decline
+is kept, and when the ask came from a client's conversation the product owner
+tells them it was declined and why.
+
+## Escalation
+
+An escalation is a question put in front of a person at the studio because it
+is not the product owner's to answer.
+
+**When.** The product owner raises one when it is asked about scope, schedule
+or price, which it never promises, or when it does not know. It raises one
+too when its own reply fails the check every reply goes through, and then it
+tells the client "I will take this to the team and come back to you" instead
+of sending it. A member or a coding agent raises one by asking the studio
+something outside any conversation. The other direction is a chase: the
+studio asking the client for something, which the client sees as something
+the studio needs from them.
+
+**Not when.** Not a request for work, which is a draft, and not a bug report.
+
+**Why.** It is how "that is not mine to promise" ends in an answer instead of
+a silence. A person resolves it, and the answer goes back into the same
+conversation in the product owner's voice; one that is dismissed reaches
+nobody. A client sees only the chases addressed to them, never the studio's
+own escalations.
+
+## Commitment
+
+A commitment is a promise made on the project, with who made it, when it was
+made and when it is due.
+
+**When.** In either direction: a promise the studio owes the client, or one
+the client owes the studio, which the studio may chase. It ends met or
+withdrawn and is never deleted.
+
+**Not when.** Not the work that keeps the promise. That is filed as work, and
+the commitment says what was promised, not how.
+
+**Why.** Promises made in a call are the first thing nobody remembers. A
+client sees only the promises made to them, and only once their studio has
+turned that on.
+
+## RAID
+
+RAID is the register of risks, assumptions, issues and dependencies: the
+things that could change the plan without anybody choosing to.
+
+**When.** Each entry has a severity, an owner who may be outside the studio,
+and a date by which somebody looks at it again. Entries are mitigated and
+closed, never deleted.
+
+**Not when.** Not a bug, which is something already broken on a surface, and
+not a task to fix one.
+
+**Why.** A risk somebody saw and nobody wrote down becomes a surprise. Reviews
+that come due land in front of the studio, and a client sees the register
+only once their studio has turned it on.
+
+## Evidence
+
+Evidence is something the world said about the product, written down once and
+tagged to the features it is about.
+
+**When.** A client remark, a usage number, a support ticket, a signal from the
+market. It is dismissed when it stops mattering, never deleted.
+
+**Not when.** Not a request for work, which is a draft, and not an opinion
+from inside the studio.
+
+**Why.** What to build next should rest on what was observed, not on what
+somebody remembers hearing. A client sees it only once their studio has
+turned it on.
+
+## Stakeholder
+
+A stakeholder is a person who matters to the project, on the client's side,
+the studio's or a third party's, with their role and how they expect to hear
+about it.
+
+**When.** For everybody whose say or whose silence would change the plan.
+
+**Not when.** Not a login. A stakeholder is somebody the studio keeps in
+mind, whether or not they ever sign in.
+
+**Why.** The studio has to know who to keep informed and who decides. This
+map is never shown to a client: a list of who matters is not shown to the
+people on it.
+
+## Digest
+
+The digest is the product owner's weekly note to the client: a few plain
+sentences about what moved, written into the client's open conversation.
+
+**When.** Once a week, on Monday, read with exactly what the client is
+allowed to see. A quiet week sends nothing, and so does a project with no
+open conversation.
+
+**Not when.** Not a report and not a promise: it names what happened and
+never a date.
+
+**Why.** A client should not have to ask to know where things are. The
+product owner also looks at what moved twice a day, but that review only
+proposes, into the approval queue, for a person to accept.
 
 ## Session
 

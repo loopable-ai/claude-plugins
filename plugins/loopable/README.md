@@ -4,9 +4,10 @@ Keeps a repository and the Loopable backlog telling the same story.
 
 A repository names its project in `.loopable.yaml` at the root (see the skill
 for the three keys). From then on six hooks apply, each doing one mechanical
-thing — anything needing judgement is a skill, not a hook — plus two commands
-and two agents, which are the two ends of a piece of work: `/loopable:start`
-begins one, `/loopable:ship` finishes it.
+thing — anything needing judgement is a skill, not a hook — plus two commands,
+which are the two ends of a piece of work (`/loopable:start` begins one,
+`/loopable:ship` finishes it), and four agents: the `verifier` and `reviewer`
+that ship runs, and the `driver` and `builder` that run the commands for you.
 
 | hook | event | |
 |---|---|---|
@@ -39,9 +40,10 @@ on a `loopable-plugin-v<version>` tag whose version matches the manifest.
 
 The token is read from `~/.config/loopable/token` (or `LOOPABLE_TOKEN`, or
 `LOOPABLE_TOKEN_FILE`) — the same file the MCP server reads. Nothing in the
-plugin holds a secret. A studio admin mints one in **Studio settings →
-Tokens**, where it is shown once; see [the MCP server's README](../mcp/) for
-the two lines that put it in place.
+plugin holds a secret. Every studio member mints their own under **My agent
+tokens** in the account menu, where it is shown once; see [the MCP server's
+README](../mcp/) for what a token may do and the two lines that put it in
+place.
 
 ## The session, reported while it happens
 
@@ -357,6 +359,57 @@ sometimes not:
    the merge guard refuses the merge until a session closes `pass` at the commit
    being merged.
 
+## The driver
+
+```
+claude --agent loopable:driver
+```
+
+A session started as the driver is a lead, not a builder. It reads the
+repository's `AGENTS.md` and the backlog, says the goal, the last decision
+and the next action, and then does two jobs: **files** what the person
+describes (`add_item`, `write_brief` with a verify method on every criterion)
+and **runs** ready items, up to four at once, to merged pull requests. Adapted
+from the driver in Avanti Studio's fountain plugin, with the backlog in place of
+GitHub issues and this plugin's scripts in place of its own:
+
+```
+start.sh  →  builder  →  ship.sh --prepare  →  verifier + reviewer  →  ship.sh --close  →  merge
+```
+
+**It drives the same machinery a person does, and adds none.** `start.sh` still
+refuses an item that is not `ready`, the close contract is still written by
+`ship.sh` from two reports the builder never touched, and the merge guard still
+refuses a merge without a `pass` at the head going in. The driver's judgement
+sits on top: merge, send findings back to the same builder (three rounds), or
+hand to the person when `AGENTS.md` says a person signs it off or the change is
+hard to undo.
+
+**The ready gate binds it.** An agent token cannot set `ready`, so the driver
+files work and then says which items need marking ready. That is the point
+rather than a limitation: a person approves the work before an agent builds it.
+
+**It never edits.** The lead that writes code stops judging it, so every change
+is a `builder`'s, one per item, in that item's worktree. The driver's
+`disallowedTools` takes its editors away — `guard-main.sh` would not, since a
+session in the main checkout may edit inside a worktree — and keeps everything
+else, because the MCP's tool names differ between a plugin install and a
+project `.mcp.json` and a list of them would be wrong in one. The builder's
+tool list is editors and Bash, **no MCP and no Agent** — `start.sh` claimed the
+item and `ship.sh` closes it, and a builder reporting on its own work is exactly
+the sentence the close contract replaced. That takes the obvious paths away,
+not every path: Bash could still run `gh pr merge` or `ship.sh`, so those rules
+are the builder's to keep, and the merge guard is what holds if it does not —
+no merge without a `pass` at the head going in. It commits and pushes
+its branch, which `/loopable:ship` will not do for a person: starting the driver
+is the person delegating that, and nothing reaches `main` past the verifier,
+the reviewer and the guard.
+
+**Its memory is the backlog**, not a file of its own: status notes, sessions
+and close contracts are what the next session reads. `test.sh` checks that every
+script and agent the driver's prose names exists, because prose does not fail
+when a script is renamed.
+
 ## What it will not catch
 
 It cannot tell you named the wrong item, and it cannot make you create an item
@@ -365,7 +418,7 @@ merged and never reported — and no more than that.
 
 ## Testing
 
-`apps/loopable/plugin/hooks/test.sh`, run by `guards` on every PR. `gh` and
+`plugin/hooks/test.sh`, run by `guards` on every PR. `gh` and
 `curl` are stubbed, the config file is a fixture, and the write guard runs
 against a throwaway git repository it creates — no network, no token, no state
 from this checkout. Half the cases assert a PASS, which is the half worth
