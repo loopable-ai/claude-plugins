@@ -38,11 +38,34 @@ command -v git >/dev/null 2>&1 || exit 0
 # in the payload is a fact about the repository.
 cat >/dev/null 2>&1
 
-SESSION=$(loopable_state session) || exit 0
-[ -n "$SESSION" ] || exit 0
 REPO=$(loopable_repo) || exit 0
+[ -n "$REPO" ] || exit 0
 
-loopable_flush_actions
+# EVERY WORKTREE'S BATCH, INTO ITS OWN SESSION (336). Under the driver the
+# process that stops is the main checkout's, and the batches tool-use.sh kept
+# are the builders' — one per worktree, each beside that worktree's session.
+# So each worktree with a batch waiting is flushed with LOOPABLE_REPO set to
+# it, and nothing is created where there was no batch. A worktree whose
+# directory is gone fails `git -C` and is skipped. The list is the trusted
+# repository's own `git worktree list`, but a STALE line (a directory deleted
+# without `git worktree remove`) names a path anybody can recreate with a
+# hand-written .git — so every line is held to loopable_trusted_worktree, the
+# same test a tool call is. loopable_activity still refuses a session or
+# project that is not an id.
+WORKTREES=$(git -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p') || WORKTREES=""
+[ -n "$WORKTREES" ] || WORKTREES=$REPO
+while IFS= read -r W; do
+  [ -n "$W" ] || continue
+  loopable_trusted_worktree "$W" "$REPO" || continue
+  G=$(git -C "$W" rev-parse --absolute-git-dir 2>/dev/null) || continue
+  [ -s "$G/loopable/actions" ] || continue
+  ( export LOOPABLE_REPO="$W"; loopable_flush_actions ) >/dev/null 2>&1
+done <<EOF
+$WORKTREES
+EOF
+
+SESSION=$(loopable_state session) || exit 0
+loopable_id_ok "$SESSION" || exit 0
 
 SUBJECT=$(git -C "$REPO" log -1 --format=%s 2>/dev/null) || SUBJECT=""
 DIRTY=$(git -C "$REPO" status --short 2>/dev/null | grep -c .) || DIRTY=0

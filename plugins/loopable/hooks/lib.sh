@@ -309,6 +309,125 @@ loopable_state_dir() { # -> a directory, created, or non-zero
   mkdir -p "$d/loopable" 2>/dev/null || return 1
   printf '%s' "$d/loopable"
 }
+# A command's leading `cd`, in its three spellings: bare, 'single' and
+# "double" quoted. ONE PARSE, so the directory that chose the worktree and the
+# prefix tool-use.sh drops from the recorded line can never disagree. Options
+# before the directory (`cd -P <dir>`, `cd -- <dir>`, `cd -L`, `-e`, `-@`) are
+# skipped: they change how the cd resolves, not where it goes. A bare `cd -`
+# (the previous directory) is not an option and names nothing that exists.
+LOOPABLE_CD_RE="^[[:space:]]*cd[[:space:]]+((-[-PLe@]+)[[:space:]]+)*(\"([^\"]+)\"|'([^']+)'|([^[:space:];&|]+))"
+loopable_cd_target() { # loopable_cd_target <command> -> the directory, as written
+  printf '%s' "$1" | sed -nE "1s/$LOOPABLE_CD_RE.*/\4\5\6/p"
+}
+# The command after a leading `cd <dir> &&` or `cd <dir> ;`, every line kept;
+# nothing when there is no such prefix (a bare `cd`, or none).
+loopable_cd_rest() { # loopable_cd_rest <command> -> the rest, or nothing
+  local rest
+  rest=$(printf '%s' "$1" | sed -E "1s/$LOOPABLE_CD_RE[[:space:]]*(&&|;)[[:space:]]*//")
+  [ "$rest" != "$1" ] && [ -n "$rest" ] && printf '%s' "$rest"
+}
+
+# WHICH WORKTREE A TOOL CALL HAPPENED IN — the call's, not the session's (336).
+#
+# Under the driver the Claude Code process runs in the MAIN checkout, so
+# CLAUDE_PROJECT_DIR is main, and a builder works in its own worktree with
+# `cd <wt> && …`. Its session was written into THAT worktree's git directory
+# by bin/start.sh, so a hook that looked where the process was found nothing
+# and dropped every call. guard-main.sh learned the same lesson for edits:
+# the repository is the file's.
+#
+# THE CALL'S OWN TARGET, MOST EXPLICIT FIRST: the file an edit names, then the
+# directory a command's leading `cd` goes to, then the `cwd` the harness
+# reports. The cwd is last, not first: a subagent's shell is reset to the
+# main checkout before every call, so its cwd is where the process sits and
+# the `cd` is where the work is. A command with neither (`git -C <wt> …`)
+# resolves to the cwd, and a builder is told to `cd` for exactly this.
+#
+# Prints the target's git toplevel, or non-zero when the call names nowhere a
+# git repository is — and only THEN does the caller fall back to loopable_repo.
+# A target that resolved is final: a call in a worktree with no session posts
+# nothing, rather than into whichever session the process happens to sit in.
+loopable_tool_repo() { # loopable_tool_repo <hook input json> -> a toplevel, or non-zero
+  local cwd dir
+  cwd=$(printf '%s' "$1" | jq -r '.cwd // ""' 2>/dev/null) || cwd=""
+  dir=$(printf '%s' "$1" | jq -r '.tool_input.file_path // ""' 2>/dev/null) || dir=""
+  if [ -z "$dir" ]; then
+    dir=$(loopable_cd_target "$(printf '%s' "$1" | jq -r '.tool_input.command // ""' 2>/dev/null)") || dir=""
+  fi
+  [ -n "$dir" ] || dir=$cwd
+  [ -n "$dir" ] || return 1
+  case "$dir" in
+    /*) : ;;
+    *) [ -n "$cwd" ] || return 1; dir="$cwd/$dir" ;;
+  esac
+  # The nearest directory that exists — the file itself may be new.
+  while [ ! -d "$dir" ] && [ "$dir" != / ]; do dir=$(dirname "$dir"); done
+  git -C "$dir" rev-parse --show-toplevel 2>/dev/null
+}
+
+# THE CALL PICKS THE WORKTREE, NEVER THE REPOSITORY. A target's own
+# .loopable.yaml and .git/loopable/session decide the project and the session
+# a post goes to, with this person's token — so a `cd` into a directory
+# somebody else wrote must not be able to choose them.
+#
+# THE TRUSTED REPOSITORY SAYS WHICH WORKTREES ARE ITS OWN, never the target.
+# Comparing common dirs asked the target, and a hand-written `.git` file
+# pointing into <trusted>/.git/worktrees answers whatever it likes. So the
+# target counts only when it is a `worktree` line of the trusted repository's
+# own `git worktree list` — the list stop.sh walks — compared as resolved
+# paths; and its git dir must be the common dir or an entry directly under
+# <common>/worktrees. The list stops a gitfile borrowing a real entry; the git
+# dir stops a STALE line — a worktree deleted without `git worktree remove`,
+# its path recreated with a `.git` pointing anywhere — which the list still
+# names.
+#
+# AND THE ENTRY MUST BE THIS PATH'S. A stale path recreated with a `.git`
+# borrowing ANOTHER live worktree's entry passes both checks above — it is on
+# the list, and the entry really is under <common>/worktrees — and would
+# report into that worktree's session under its own planted .loopable.yaml.
+# So the entry is bound to the path: <common>/worktrees/<name>/gitdir, which
+# git writes and the target cannot, must name <toplevel>/.git; and the common
+# dir itself belongs only to the main worktree, the list's first line.
+loopable_resolved() { # loopable_resolved <dir> -> its physical path, or non-zero
+  (cd -P "$1" 2>/dev/null && pwd -P)
+}
+loopable_trusted_worktree() { # loopable_trusted_worktree <toplevel> <trusted dir>
+  local t common g w list owner
+  t=$(loopable_resolved "$1") || return 1
+  common=$(git -C "$2" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  common=$(loopable_resolved "$common") || return 1
+  g=$(git -C "$t" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  g=$(loopable_resolved "$g") || return 1
+  list=$(git -C "$2" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  if [ "$g" = "$common" ]; then
+    [ "$(loopable_resolved "$(printf '%s\n' "$list" | head -1)")" = "$t" ] || return 1
+  elif [ "$(dirname "$g")" = "$common/worktrees" ]; then
+    owner=$(head -1 "$g/gitdir" 2>/dev/null) || return 1
+    [ "$(basename "$owner")" = .git ] || return 1
+    [ "$(loopable_resolved "$(dirname "$owner")")" = "$t" ] || return 1
+  else
+    return 1
+  fi
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    [ "$(loopable_resolved "$w")" = "$t" ] && return 0
+  done <<EOF
+$list
+EOF
+  return 1
+}
+
+# WHAT GOES INTO AN API PATH IS AN ID. The session, the item and the project
+# are read from files, and a value carrying a `/`, a `?`, a `%` or a `..`
+# would change which route a post reaches. A uuid, a ref and the backlog's
+# other ids are letters, digits and dashes; anything else is not ours.
+#
+# THE WHOLE VALUE, in bash's own match: `grep -x` matches LINE by line, so a
+# good first line once carried anything at all on the second.
+loopable_id_ok() { # loopable_id_ok <value> -> true when it is safe in a path
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,63}$ ]]
+}
+
 loopable_state() { # loopable_state <name> -> its contents, or non-zero
   local d; d=$(loopable_state_dir) || return 1
   [ -r "$d/$1" ] || return 1
@@ -419,8 +538,9 @@ loopable_item() { # -> a work item id, or non-zero
 loopable_activity() { # loopable_activity <kind> <body> [ref json]
   local p s ref payload
   p=$(loopable_project) || return 1
+  loopable_id_ok "$p" || return 1
   s=$(loopable_state session) || return 1
-  [ -n "$s" ] || return 1
+  loopable_id_ok "$s" || return 1
   ref=${3:-}
   [ -n "$ref" ] || ref='{}'
   payload=$(jq -nc --arg k "$1" --arg b "$2" --argjson r "$ref" \

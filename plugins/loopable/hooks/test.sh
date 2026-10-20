@@ -773,6 +773,252 @@ OUT=$(stop)
 check "no session: Stop is silent"          none "${OUT:-none}"
 check "no session: and posts nothing"       0 "$(grep -c . "$STUB_CALLS")"
 
+# --- a builder in a worktree, the process in the main checkout (336) -------
+# THE DRIVER'S SHAPE. Claude Code runs in the main checkout, so
+# CLAUDE_PROJECT_DIR is the main checkout and every hook used to look for the
+# session there; a builder works in its own worktree with `cd <wt> && …`, and
+# bin/start.sh wrote that worktree's session into the worktree's git directory.
+# Every one of its calls found no session and was dropped. The call's OWN
+# target says where it happened: the file it edited, the directory its command
+# cd'd into, the cwd the harness reports — and nothing else.
+WTA="$STUB/sess-wt-a"; WTB="$STUB/sess-wt-b"
+git -C "$SESS" worktree add -q "$WTA" -b feat/a-worktree main 2>/dev/null
+git -C "$SESS" worktree add -q "$WTB" -b feat/b-worktree main 2>/dev/null
+ADIR="$(git -C "$WTA" rev-parse --absolute-git-dir)/loopable"
+BDIR="$(git -C "$WTB" rev-parse --absolute-git-dir)/loopable"
+# What bin/start.sh leaves behind: the item and the session, written into the
+# NEW worktree's git directory. Nothing in the main checkout's.
+open_wts() { # open_wts [a] [b] -> those worktrees get a session, the rest none
+  reset_state; rm -rf "$ADIR" "$BDIR"; mkdir -p "$ADIR" "$BDIR"
+  case " $* " in *" a "*) printf '%s' "$OPEN" > "$ADIR/item"; printf 's-a' > "$ADIR/session" ;; esac
+  case " $* " in *" b "*) printf '%s' "$TODO" > "$BDIR/item"; printf 's-b' > "$BDIR/session" ;; esac
+}
+buffered() { [ -s "$1/actions" ] && wc -l < "$1/actions" | tr -d ' ' || echo 0; }
+
+open_wts a b
+OUT=$(tu "$(bash_call "cd $WTA && ls -la")")
+check "a cd'd command from the main checkout says nothing" none "${OUT:-none}"
+check "is buffered in its worktree"                1 "$(buffered "$ADIR")"
+check "and nowhere else"                           "0 0" "$(buffered "$SDIR") $(buffered "$BDIR")"
+tu "$(jq -nc --arg f "$WTA/apps/loopable/index.mjs" '{tool_name:"Edit",tool_input:{file_path:$f}}')" >/dev/null
+check "an edit of a worktree file is buffered there" 2 "$(buffered "$ADIR")"
+tu "$(jq -nc --arg f "$WTA/apps/loopable/new/deep.mjs" '{tool_name:"Write",tool_input:{file_path:$f}}')" >/dev/null
+check "so is a new file in a new directory"        3 "$(buffered "$ADIR")"
+tu "$(jq -nc --arg d "$WTA" '{tool_name:"Bash",tool_input:{command:"git status"},cwd:$d}')" >/dev/null
+check "and a command whose cwd is the worktree"    4 "$(buffered "$ADIR")"
+i=4; while [ $i -lt 10 ]; do tu "$(bash_call "cd '$WTA' && echo $i")" >/dev/null; i=$((i+1)); done
+check "the tenth posts ONE action to that worktree's session" 1 "$(posted '/sessions/s-a/activities$')"
+check "and to no other session"                    1 "$(posted /activities)"
+check "as an action"                               1 "$(last_body | grep -c '"kind":"action"')"
+check "carrying the worktree's commands"           1 "$(last_body | grep -c 'echo 9')"
+
+# A PR opened from a worktree is that worktree's result, naming its item.
+open_wts a
+tu "$(jq -nc --arg c "cd $WTA && gh pr create --fill" --arg o "$PR" \
+  '{tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:$o}}')" >/dev/null
+check "a PR opened in a worktree is posted to its session" 1 "$(posted '/sessions/s-a/activities$')"
+check "naming that worktree's item"                1 "$(last_body | grep -cF "\"item_id\":\"$OPEN\"")"
+
+# THE MAIN CHECKOUT, WITH NO SESSION, STILL COSTS NOTHING — a worktree with a
+# session open beside it is not an invitation to report main's calls there.
+open_wts a b
+tu "$(bash_call 'ls')" >/dev/null
+tu "$(bash_call "cd $SESS && ls")" >/dev/null
+tu "$(jq -nc --arg f "$SESS/apps/loopable/index.mjs" '{tool_name:"Edit",tool_input:{file_path:$f}}')" >/dev/null
+check "main-checkout calls post nothing"           0 "$(grep -c . "$STUB_CALLS")"
+check "and buffer nothing, anywhere"               "0 0 0" "$(buffered "$SDIR") $(buffered "$ADIR") $(buffered "$BDIR")"
+
+# ONE WORKTREE NEVER REPORTS INTO ANOTHER'S SESSION — not when the process sits
+# in A, and not when B has no session of its own to fall back from.
+open_wts a b
+printf '%s' "$(bash_call "cd $WTB && ls")" | CLAUDE_PROJECT_DIR="$WTA" "$HERE/tool-use.sh" >/dev/null 2>&1
+check "a B call from a session in A goes to B"     "0 1" "$(buffered "$ADIR") $(buffered "$BDIR")"
+open_wts a
+printf '%s' "$(bash_call "cd $WTB && ls")" | CLAUDE_PROJECT_DIR="$WTA" "$HERE/tool-use.sh" >/dev/null 2>&1
+printf '%s' "$(jq -nc --arg f "$WTB/apps/loopable/index.mjs" '{tool_name:"Edit",tool_input:{file_path:$f}}')" |
+  CLAUDE_PROJECT_DIR="$WTA" "$HERE/tool-use.sh" >/dev/null 2>&1
+check "B with no session: nothing lands in A"      "0 0" "$(buffered "$ADIR") $(buffered "$BDIR")"
+check "and nothing is posted"                      0 "$(grep -c . "$STUB_CALLS")"
+
+# STOP, IN THE SAME SITUATION. The process stopping is the main checkout's, and
+# the batches are the worktrees': each is flushed into its own session, and the
+# main checkout — which has none — says nothing for itself.
+open_wts a b
+tu "$(bash_call "cd $WTA && ls a")" >/dev/null
+tu "$(bash_call "cd $WTA && ls a2")" >/dev/null
+tu "$(bash_call "cd $WTB && ls b")" >/dev/null
+: > "$STUB_CALLS"
+OUT=$(stop)
+check "Stop from the main checkout says nothing"   none "${OUT:-none}"
+check "flushes A's batch into A's session"         1 "$(posted '/sessions/s-a/activities$')"
+check "and B's into B's"                           1 "$(posted '/sessions/s-b/activities$')"
+check "A's batch carries only A's lines"           "1 0" "$(grep '/sessions/s-a/' "$STUB_CALLS" | cut -f3 |
+  awk '/ls a2/ {a=1} /ls b/ {b=1} END {printf "%d %d", a, b}')"
+check "every post is an action, no summary"        2 "$(grep -c '"kind":"action"' "$STUB_CALLS")"
+check "the buffers are emptied"                    "0 0" "$(buffered "$ADIR") $(buffered "$BDIR")"
+check "and no state dir is made where none was"    0 "$(rm -rf "$BDIR"; stop >/dev/null; [ -d "$BDIR" ] && echo 1 || echo 0)"
+
+# ONLY THIS REPOSITORY'S WORKTREES. A call's own target decides WHICH worktree,
+# never WHICH REPOSITORY: a `cd` into a clone somebody else wrote, with its own
+# .loopable.yaml and its own .git/loopable/session, would otherwise choose the
+# project and the session a post made with this person's token goes to. A
+# target outside the repository the process trusts posts nothing — and does
+# not fall back to the process's session either.
+EVIL="$STUB/evil"
+git init -q -b main "$EVIL"
+printf 'project: p-evil\n' > "$EVIL/.loopable.yaml"
+git -C "$EVIL" add -A && git -C "$EVIL" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm evil
+EDIR="$(git -C "$EVIL" rev-parse --absolute-git-dir)/loopable"
+mkdir -p "$EDIR"; printf 's-evil' > "$EDIR/session"; printf '%s' "$OPEN" > "$EDIR/item"
+open_wts a
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $EVIL && ls $i")" >/dev/null; i=$((i+1)); done
+tu "$(jq -nc --arg f "$EVIL/x.mjs" '{tool_name:"Edit",tool_input:{file_path:$f}}')" >/dev/null
+tu "$(jq -nc --arg d "$EVIL" '{tool_name:"Bash",tool_input:{command:"ls"},cwd:$d}')" >/dev/null
+check "a cd into another repository posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+check "and buffers nothing, there or here"         "0 0 0" "$(buffered "$EDIR") $(buffered "$ADIR") $(buffered "$SDIR")"
+i=0; while [ $i -lt 10 ]; do
+  printf '%s' "$(bash_call "cd $EVIL && ls $i")" | CLAUDE_PROJECT_DIR="$WTA" "$HERE/tool-use.sh" >/dev/null 2>&1
+  i=$((i+1)); done
+check "nor into the session the process sits in"   "0 0" "$(buffered "$ADIR") $(grep -c . "$STUB_CALLS")"
+
+# A GITFILE IS THE TARGET'S OWN SAY-SO. A directory whose hand-written `.git`
+# points into this repository's .git/worktrees shares its common dir, and
+# would pass any test that asks the target where its repository is. The
+# trusted repository's own `git worktree list` is the answer: what it does not
+# name is not one of its worktrees. Two shapes — a crafted entry with a
+# session file of its own, and worktree A's REAL git dir borrowed by a
+# directory that is not A.
+FAKE="$STUB/fake-wt"; FAKEG="$(git -C "$SESS" rev-parse --absolute-git-dir)/worktrees/fake"
+mkdir -p "$FAKE" "$FAKEG/loopable"
+cp "$(git -C "$SESS" rev-parse --absolute-git-dir)/HEAD" "$FAKEG/HEAD"
+printf '../..\n' > "$FAKEG/commondir"
+printf 's-evil' > "$FAKEG/loopable/session"; printf '%s' "$OPEN" > "$FAKEG/loopable/item"
+printf 'gitdir: %s\n' "$FAKEG" > "$FAKE/.git"
+printf 'project: p-evil\n' > "$FAKE/.loopable.yaml"
+BORROW="$STUB/borrow-wt"; mkdir -p "$BORROW"
+printf 'gitdir: %s\n' "$(git -C "$WTA" rev-parse --absolute-git-dir)" > "$BORROW/.git"
+printf 'project: p-evil\n' > "$BORROW/.loopable.yaml"
+open_wts a
+i=0; while [ $i -lt 10 ]; do
+  tu "$(bash_call "cd $FAKE && ls $i")" >/dev/null
+  tu "$(jq -nc --arg f "$BORROW/x$i.mjs" '{tool_name:"Edit",tool_input:{file_path:$f}}')" >/dev/null
+  i=$((i+1)); done
+check "a hand-written gitfile into .git/worktrees posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+check "and buffers nothing, in it or in A"         "0 0" "$(buffered "$FAKEG/loopable") $(buffered "$ADIR")"
+rm -rf "$FAKEG"
+
+# A STALE ENTRY IS STILL ON THE LIST. A worktree whose directory was deleted
+# without `git worktree remove` stays a `worktree` line, and a directory
+# recreated at that path with a hand-written `.git` passes the list. What it
+# cannot pass is the git dir: it is not the common dir and not an entry
+# under <common>/worktrees, it is somebody else's. Here that is the clone
+# from above, with a batch and a session waiting in it — both for a tool
+# call and for the Stop that walks the list.
+STALE="$STUB/stale-wt"
+git -C "$SESS" worktree add -q "$STALE" -b feat/stale-worktree main 2>/dev/null
+rm -rf "$STALE"; mkdir -p "$STALE"
+printf 'gitdir: %s\n' "$(git -C "$EVIL" rev-parse --absolute-git-dir)" > "$STALE/.git"
+printf 'project: p-evil\n' > "$STALE/.loopable.yaml"
+check "the stale path is still on the list"        1 \
+  "$(git -C "$SESS" worktree list --porcelain | grep -cxF "worktree $STALE")"
+open_wts a
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $STALE && ls $i")" >/dev/null; i=$((i+1)); done
+check "a call in a recreated stale worktree posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+printf '$ planted\n' > "$EDIR/actions"
+stop >/dev/null
+check "and Stop does not flush its planted batch"  0 "$(grep -c . "$STUB_CALLS")"
+check "which is left where it was"                 1 "$(buffered "$EDIR")"
+rm -f "$EDIR/actions"; git -C "$SESS" worktree prune 2>/dev/null; rm -rf "$STALE"
+
+# AN ENTRY BELONGS TO ONE PATH. A stale path recreated with a `.git` that
+# borrows ANOTHER live worktree's entry passes the list (the path is still on
+# it) and the git-dir shape (the entry really is under <common>/worktrees) —
+# and would report into that worktree's session under the planted
+# .loopable.yaml's project. The entry's own `gitdir` file names the one path
+# it belongs to. Named to sort before worktree A, so a Stop walking the list
+# reaches the impostor before the real one.
+STALE2="$STUB/aaa-stale-borrower"
+git -C "$SESS" worktree add -q "$STALE2" -b feat/stale-borrower main 2>/dev/null
+rm -rf "$STALE2"; mkdir -p "$STALE2"
+printf 'gitdir: %s\n' "$(git -C "$WTA" rev-parse --absolute-git-dir)" > "$STALE2/.git"
+printf 'project: p-evil\n' > "$STALE2/.loopable.yaml"
+open_wts a
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $STALE2 && ls $i")" >/dev/null; i=$((i+1)); done
+check "a stale path borrowing a live entry posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+check "and buffers nothing into that worktree"     0 "$(buffered "$ADIR")"
+printf '$ the real batch\n' > "$ADIR/actions"
+stop >/dev/null
+check "Stop posts nothing under the planted project" 0 "$(grep -c '/projects/p-evil/' "$STUB_CALLS")"
+check "and flushes A's batch into A's own"         1 "$(grep -c '/projects/p-1/sessions/s-a/activities' "$STUB_CALLS")"
+# The other entry to borrow is the COMMON DIR itself, which is the main
+# checkout's and nobody else's.
+printf 'gitdir: %s\n' "$(git -C "$SESS" rev-parse --absolute-git-dir)" > "$STALE2/.git"
+open_wts; start >/dev/null; : > "$STUB_CALLS"   # the main checkout HAS a session
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $STALE2 && ls $i")" >/dev/null; i=$((i+1)); done
+check "a stale path borrowing the common dir posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+check "and buffers nothing into the main checkout" 0 "$(buffered "$SDIR")"
+# ...while the main checkout itself, with a session of its own, still counts.
+tu "$(bash_call "cd $SESS && ls")" >/dev/null
+check "the main checkout's own cd'd call is buffered there" 1 "$(buffered "$SDIR")"
+reset_state
+rm -rf "$STALE2"; git -C "$SESS" worktree prune 2>/dev/null
+
+# AN ID IS THE WHOLE VALUE, not a line of it: grep matched line by line, so a
+# good first line carried anything at all on the second.
+open_wts a
+printf 's-a\n../../items?x=1' > "$ADIR/session"
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $WTA && ls $i")" >/dev/null; i=$((i+1)); done
+stop >/dev/null
+check "a session id with a second line posts nothing" 0 "$(grep -c . "$STUB_CALLS")"
+
+# THE LINE IS THE COMMAND, NOT WHERE IT RAN. A line is cut at 80 characters,
+# and a real worktree path is ~105 (.claude/worktrees/<slug> under a home
+# directory), so `cd <wt> && npm test` recorded whole was the path and never
+# the command. The session already says which worktree; the `cd` that chose
+# it is dropped, and a `cd` into a directory inside it keeps only the part
+# relative to the worktree.
+LONG="$STUB/a-worktree-path-long-enough-to-fill-the-eighty-character-line-on-its-own-before-the-command-starts"
+git -C "$SESS" worktree add -q "$LONG" -b feat/long-worktree main 2>/dev/null
+mkdir -p "$LONG/apps/loopable/api"
+LDIR="$(git -C "$LONG" rev-parse --absolute-git-dir)/loopable"
+open_wts; rm -rf "$LDIR"; mkdir -p "$LDIR"; printf 's-l' > "$LDIR/session"
+tu "$(bash_call "cd $LONG && npm test")" >/dev/null
+tu "$(bash_call "cd '$LONG' ; git status --short")" >/dev/null
+tu "$(bash_call "cd \"$LONG/apps/loopable/api\" && npm run lint")" >/dev/null
+tu "$(bash_call "cd $LONG")" >/dev/null
+tu "$(bash_call "cd -P $LONG && npm ci")" >/dev/null
+tu "$(bash_call "cd -- '$LONG' && npm run build")" >/dev/null
+check "a long worktree path leaves the command"    '$ npm test' "$(sed -n 1p "$LDIR/actions")"
+check "quoted, and after a semicolon"              '$ git status --short' "$(sed -n 2p "$LDIR/actions")"
+check "a subdirectory stays, relative"             '$ cd apps/loopable/api && npm run lint' "$(sed -n 3p "$LDIR/actions")"
+check "a bare cd is kept as it was"                1 "$(sed -n 4p "$LDIR/actions" | grep -c '^\$ cd ')"
+# `cd -P <dir>` and `cd -- <dir>` are a cd to <dir>: the options are skipped,
+# not taken for the directory.
+check "cd -P is a cd to its directory"             '$ npm ci' "$(sed -n 5p "$LDIR/actions")"
+check "and so is cd --"                            '$ npm run build' "$(sed -n 6p "$LDIR/actions")"
+rm -rf "$LDIR"
+
+# WHAT GOES INTO A PATH IS AN ID. The session, the project and the item are
+# read from files, and a value that could carry a `/`, a `?` or a `..` into
+# the API path is not one of ours: it posts nothing.
+open_wts a
+printf '../../items?x=1' > "$ADIR/session"
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $WTA && ls $i")" >/dev/null; i=$((i+1)); done
+stop >/dev/null
+check "a malformed session id posts nothing"      0 "$(grep -c . "$STUB_CALLS")"
+check "and buffers nothing"                        0 "$(buffered "$ADIR")"
+open_wts a
+cp "$WTA/.loopable.yaml" "$STUB/wta-config"
+printf 'project: ../p-1\n' > "$WTA/.loopable.yaml"
+i=0; while [ $i -lt 10 ]; do tu "$(bash_call "cd $WTA && ls $i")" >/dev/null; i=$((i+1)); done
+check "a malformed project posts nothing"          0 "$(posted /activities)"
+cp "$STUB/wta-config" "$WTA/.loopable.yaml"
+open_wts a
+printf 'x"/../y' > "$ADIR/item"
+tu "$(jq -nc --arg c "cd $WTA && gh pr create --fill" --arg o "$PR" \
+  '{tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:$o}}')" >/dev/null
+check "a malformed item is left out of the PR ref" "1 0" "$(posted /activities) $(last_body | grep -c item_id)"
+
 echo
 echo " every failure is a pass — the whole point of the story:"
 # THE SABOTAGE. A dead port for the API, which is the shape of every real
@@ -1202,6 +1448,32 @@ run_ship --close
 check "a criterion the report never mentions — refused" 1 "$RC"
 check "naming the one that is missing" 1 "$(shipped | grep -c 'The pull request names its item')"
 check "and nothing was closed"         0 "$(closed_payload | grep -c .)"
+
+# THE SESSION ID IS A PATH SEGMENT of the close, so anything but an id is no
+# session — refused with every other part of the close in order, so that the
+# id is the only thing wrong, and before any request is made (336).
+report pass met met
+printf '../../items?x=1' > "$SDIR2/session"
+run_ship --close
+check "a malformed session id — refused" 1 "$RC"
+check "before any request is made"     0 "$(grep -c . "$STUB_CALLS")"
+ship_state
+# The project is a path segment of every request ship.sh makes, too. The bad
+# config is COMMITTED AND PUSHED (to the fixture's own origin), so neither a
+# dirty tree nor an unpushed commit is what refuses it — the id is the only
+# thing wrong — and both are taken back after, so the sha the later cases
+# claim is unchanged.
+SHP_WAS=$(git -C "$SHP" rev-parse HEAD)
+SHP_BR=$(git -C "$SHP" symbolic-ref --short HEAD)
+printf 'project: ../p-1\npaths:\n  - apps/loopable\n' > "$SHP/.loopable.yaml"
+git -C "$SHP" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qam 'bad project'
+git -C "$SHP" push -q origin "$SHP_BR" 2>/dev/null
+run_ship --close
+check "a malformed project id — refused" 1 "$RC"
+check "and says the project is not an id" 1 "$(shipped | grep -c 'project id')"
+check "before any request is made, too" 0 "$(grep -c . "$STUB_CALLS")"
+git -C "$SHP" reset -q --hard "$SHP_WAS"
+git -C "$SHP" push -qf origin "$SHP_WAS:refs/heads/$SHP_BR" 2>/dev/null
 
 echo
 echo " --close, the whole sequence:"

@@ -46,12 +46,27 @@ BATCH_SECONDS=300
 command -v jq >/dev/null 2>&1 || exit 0
 INPUT=$(cat) || exit 0
 
+# THE WORKTREE IS THE CALL'S, not the process's (336): a builder in a worktree
+# under a driver in the main checkout reports into the worktree's session.
+# Exported, so the state dir, the item and the project all agree with it.
+#
+# ONLY A WORKTREE OF THE REPOSITORY THE PROCESS TRUSTS — the one loopable_repo
+# names, by ITS OWN worktree list. A target anywhere else (a clone, or a
+# directory whose hand-written .git points into ours) is outside, and posts
+# nothing: no fallback, because falling
+# back would report a call in somebody else's repository into ours.
+if ROOT=$(loopable_tool_repo "$INPUT") && [ -n "$ROOT" ]; then
+  TRUSTED=$(loopable_repo) || exit 0
+  [ -n "$TRUSTED" ] && loopable_trusted_worktree "$ROOT" "$TRUSTED" || exit 0
+  export LOOPABLE_REPO="$ROOT"
+fi
+
 STATE=$(loopable_state_dir) || exit 0
 # No session, nothing to report into. Cheap, and before anything else: a
 # session that never opened (main, no config, no token) must cost a tool call
-# nothing at all.
+# nothing at all. A session file holding anything but an id is no session.
 SESSION=$(loopable_state session) || exit 0
-[ -n "$SESSION" ] || exit 0
+loopable_id_ok "$SESSION" || exit 0
 
 TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // ""') 2>/dev/null || exit 0
 CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""') 2>/dev/null || CMD=""
@@ -74,6 +89,7 @@ if [ -n "$CMD" ] && printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])gh[[:space:
   if [ -n "$URL" ]; then
     NUM=${URL##*/}
     ITEM=$(loopable_state item) || ITEM=""
+    loopable_id_ok "$ITEM" || ITEM=""
     REF=$(jq -nc --arg u "$URL" --arg n "$NUM" --arg i "$ITEM" \
       '{pr_url: $u, pr_number: ($n | tonumber?), item_id: (if $i == "" then null else $i end)}
        | with_entries(select(.value != null))') || REF=""
@@ -83,6 +99,28 @@ if [ -n "$CMD" ] && printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])gh[[:space:
 fi
 
 # ---------------------------------------------------------- the batch line --
+#
+# THE LINE IS THE COMMAND, NOT WHERE IT RAN. A line is cut at 80 characters
+# and a worktree path is ~105, so `cd <wt> && npm test` recorded whole showed
+# only the path. When the leading `cd` is what chose this worktree, the
+# session already says where: the prefix is dropped, and a `cd` into a
+# directory inside the worktree keeps only the part relative to it.
+if [ "$TOOL" = Bash ] && [ -n "${ROOT:-}" ] && REST=$(loopable_cd_rest "$CMD"); then
+  TO=$(loopable_cd_target "$CMD")
+  case "$TO" in
+    /*) : ;;
+    *) TO="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)/$TO" ;;
+  esac
+  TO=$(cd -P "$TO" 2>/dev/null && pwd -P) || TO=""
+  WT=$(cd -P "$ROOT" 2>/dev/null && pwd -P) || WT=""
+  if [ -n "$TO" ] && [ -n "$WT" ]; then
+    case "$TO" in
+      "$WT")   CMD=$REST ;;
+      "$WT"/*) CMD="cd ${TO#"$WT"/} && $REST" ;;
+    esac
+  fi
+fi
+
 case "$TOOL" in
   Bash)        [ -n "$CMD" ] || exit 0; LINE="$ $(loopable_safe "$CMD")" ;;
   Edit|Write|NotebookEdit)

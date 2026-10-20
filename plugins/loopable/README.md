@@ -78,6 +78,22 @@ appends **one line to a file and makes no request at all**, posted as a single
 `action` activity at ten lines or five minutes, whichever comes first. Per-call
 activities would be a session with four hundred rows and a bill to match.
 
+**The session is the call's worktree's, not the process's.** Under the driver
+Claude Code runs in the main checkout and a builder works in its worktree with
+`cd <wt> && …`, so the session a call belongs to is found from the call itself:
+the file an edit names, then the directory a command's leading `cd` goes to,
+then the harness's `cwd` — and only when none of them is in a git repository,
+the project directory. A call that resolved to a worktree with no session
+posts nothing; it never falls back into another worktree's session. The call
+picks the worktree, **never the repository**: a target the project directory's
+own `git worktree list` does not name — a clone with its own `.loopable.yaml`
+and session file, or a directory whose hand-written `.git` points into ours —
+posts nothing, and a session, item or project that is not a plain id never
+reaches an API path (`bin/ship.sh` refuses one too). A call into a nested
+repository inside a worktree — a submodule, a vendored clone — resolves to that
+repository, which no worktree list names, so it is recorded nowhere, on purpose. Stop flushes every worktree's waiting
+batch into that worktree's own session.
+
 **Stop summarises; it does not close.** Closing `complete` is a claim, and the
 close contract wants a brief revision, a HEAD sha, a verifier verdict, every
 criterion accounted for, screenshots and a cost — none of it knowable to a hook

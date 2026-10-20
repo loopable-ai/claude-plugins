@@ -90,6 +90,9 @@ project it belongs to, so there is no session to close and no item to name."
 PROJECT=$(loopable_project) || die \
   "Cannot tell which project this repository belongs to: no \`project:\` in .loopable.yaml,
 and this token can see more than one."
+# Every request below carries the project in its path, so it has to be an id.
+loopable_id_ok "$PROJECT" || die \
+  "The \`project:\` in .loopable.yaml is not a project id, so no request is made with it."
 
 BRANCH=$(git -C "$WORKTREE" symbolic-ref --quiet --short HEAD 2>/dev/null) || BRANCH=""
 case "$BRANCH" in
@@ -111,6 +114,12 @@ Work is started with:
 which claims the item, makes the worktree and opens the session. If the session
 was opened elsewhere, put its ids in $STATE/item and $STATE/session."
 fi
+# Both ids go into API paths — the item's pack, the close, the attachments —
+# so each has to be an id: the hooks' rule (loopable_id_ok in lib.sh), for the
+# same reason.
+loopable_id_ok "$SESSION" && loopable_id_ok "$ITEM" || die \
+  "$STATE/item or $STATE/session does not hold an id, so there is nothing to close. Put
+the ids of the item and its open session there, or start the work again with /loopable:start."
 
 # ------------------------------------------------------------- the checks --
 #
