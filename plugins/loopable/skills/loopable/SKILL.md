@@ -34,7 +34,7 @@ describe reasoning; the backlog says what is left to do.
 | `revise` | fix an item's title or body. Not its visibility, kind or parent. |
 | `link_items` | this must be done before that |
 | `ask_studio` | a question a person has to answer, into the escalations inbox |
-| `report_progress` | `todo` / `in_progress` / `in_review` / `blocked` / `awaiting_input`, with one sentence about what happened. Not `done` — a person accepts the work. |
+| `report_progress` | `todo` / `in_progress` / `in_review` / `blocked` / `awaiting_input`, with one sentence about what happened. Not `ready`, `verifying` or `done` — those are a person's. A token its owner minted with the grant may set them, but only when that person asks in the session and names the items; without the grant the API refuses. |
 
 `add_item` and `propose` are not two ways to do one thing. The line is **where
 the work came from**, not how much anybody is trusted: our own decided work

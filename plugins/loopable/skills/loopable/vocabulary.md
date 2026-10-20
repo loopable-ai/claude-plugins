@@ -329,7 +329,13 @@ The first six are a road and the last three are places to stand. Who may take
 which step is not the same question: a person may take any of them, and an
 agent may report its way to `in_review` and no further — it does not groom
 its own work, it does not decide that a deploy happened, and it does not
-accept what it built. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
+accept what it built. The one exception is a person's own: whoever mints an
+agent token may choose, then, to let it set `ready`, `verifying` and `done`
+for them. Those moves are still the person's — the trail names them and the
+token they came through — and the agent makes one only when the person asks
+for it, naming the items, never on its own judgement. Nothing else changes:
+such a token still never drops an item, and it reaches only what its
+membership reaches. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
 
 ## The rank rule
 

@@ -59,10 +59,21 @@ Edit and Write because a `disallowedTools` list on you reaches the agents you
 spawn, and a builder without an editor cannot build.
 
 **Why the ready gate binds you:** an agent token cannot set `ready`, `verifying`
-or `done` (`TRANSITIONS` in the API). `ready` is a person saying "build this", and
+or `done` (`TRANSITIONS` in the API) unless its person gave it the grant (below).
+`ready` is a person saying "build this", and
 `start.sh` refuses anything without it. You file work; a person approves it; then
 you build it. Never ask for the gate to be loosened to get past it — ask for the
 item to be marked ready.
+
+**A token that carries the grant does not change who decides.** A person may mint
+their token with the grant to set `ready`, `verifying` and `done` for them (the
+token list on `/tokens` says which carry it). With such a token you set one of
+those ONLY when the person asks for it in this session and names the items —
+"mark 336 ready", "accept 302" — and only on the items named. Never on your own
+judgement that work is groomed, deployed or finished, never on an item they did
+not name, and never because a verdict came back `pass`: the move is recorded as
+theirs, made through your token, so it must be one they asked for. Without the
+grant the API refuses the move; say so and ask the person to set it.
 
 **Your memory is the backlog.** Status notes, sessions, close contracts and
 activities are where the next session — yours or a person's — finds out what
@@ -75,8 +86,10 @@ and if the answer is nowhere, file that gap as an item.
 - **The loopable MCP**, reads freely. Writes: `add_item`, `write_brief`,
   `revise`, `link_items` and `propose` when filing work; `open_session` when a
   re-ship needs one (below); `report_progress` only to say `blocked` or
-  `awaiting_input` about an item you hold. `start.sh` reports `in_progress` and
-  a close reports `in_review` — never repeat either.
+  `awaiting_input` about an item you hold, or — with a token carrying the grant
+  — `ready`, `verifying` or `done` on the items the person named when they asked
+  for it in this session (above). `start.sh` reports `in_progress` and a close
+  reports `in_review` — never repeat either.
 - **Bash**, for `git` and `gh` reads, the plugin's `bin/` scripts, `gh pr
   merge`, `gh pr checks`, `gh run`, and whatever the repository's `AGENTS.md`
   says verifies a deploy, and a release tag when `AGENTS.md` says to push
@@ -238,7 +251,8 @@ ones — and nothing below sends it to the person.
   background, and verify by sha, never by "the latest run". A deploy that does
   not match is the person's at once.
 - The item stays `in_review`: `done` is the person's to accept. Say which items
-  are waiting for them.
+  are waiting for them. With a token carrying the grant, set `done` only after
+  the person says to, naming those items.
 
 **Fix** when the verdict is `fail`, the review ends `hold`, or a check fails:
 SendMessage `builder-<ref>` with each
@@ -287,7 +301,9 @@ backlog that says what is true.
 - Merge a head nobody verified, past a red check, a `hold`, or a refusal.
 - Tell the verifier or the reviewer what the change does, or edit their reports.
 - Deploy, touch a cloud account or production data, or remove a worktree.
-- Set `ready` or `done` — you cannot — or ask for the gate to be loosened.
+- Set `ready`, `verifying` or `done` on your own judgement — without the grant
+  you cannot, and with it only the person asking in this session, naming the
+  items, is a reason — or ask for the gate to be loosened.
 - Let a builder widen scope. If the brief was wrong, revise the brief.
 - Write to an item the person did not ask you to file, change or start — a
   refused start included.

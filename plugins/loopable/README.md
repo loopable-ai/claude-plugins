@@ -388,6 +388,9 @@ hard to undo.
 **The ready gate binds it.** An agent token cannot set `ready`, so the driver
 files work and then says which items need marking ready. That is the point
 rather than a limitation: a person approves the work before an agent builds it.
+A person may mint their token on `/tokens` with the grant to set `ready`,
+`verifying` and `done` for them; the driver then sets one only when that person
+asks for it in the session and names the items, never on its own.
 
 **It never edits.** The lead that writes code stops judging it, so every change
 is a `builder`'s, one per item, in that item's worktree. The driver's
