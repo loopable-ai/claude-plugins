@@ -9,8 +9,10 @@
 # plugin/ has to move the version, and the tag follows the merge.
 #
 #   check-version.sh <base> <head>     exit 1 when anything under plugin/
-#                                      changed between the two refs and the
-#                                      version in plugin.json did not
+#                                      changed and the version in plugin.json
+#                                      is not above main's, from the
+#                                      merge-base (main's later work is not
+#                                      the branch's)
 #
 # Run by the guards workflow on every pull request with the PR's base and head.
 # On main there is no base to compare against and the guard does not run.

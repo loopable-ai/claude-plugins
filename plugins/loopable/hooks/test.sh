@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for the Loopable hooks. Run after touching either:
 #
-#   apps/loopable/plugin/hooks/test.sh
+#   plugin/hooks/test.sh
 #
 # `gh` and `curl` are stubbed on PATH, so these are hermetic: no network, no
 # token, no repo state. That matters more here than usual, because the guard's
@@ -118,7 +118,8 @@ case "$U" in
   # ONE SESSION, open or closed (333): ship.sh --prepare asks before it ships,
   # because a session closes once and a fix round needs the next one. LAST, so
   # every `*/sessions/*/<thing>` above keeps its own door.
-  */sessions/*)    answer "$(cat "${STUB_SESSION:-/dev/null}")" ;;
+  # The lookup can fail on its own, which is a path --prepare takes.
+  */sessions/*)    answer "$(cat "${STUB_SESSION:-/dev/null}")" "${STUB_SESSION_CODE:-200}" ;;
 esac
 exit 22
 CURL
@@ -131,7 +132,7 @@ export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
 export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
 export STUB_ATT_N="$STUB/attn" STUB_CLOSE_ERR="$STUB/closeerr"
 export STUB_OPEN_ERR="$STUB/openerr" STUB_SESSION="$STUB/session"
-export STUB_CLOSE_CODE= STUB_OPEN_CODE=
+export STUB_CLOSE_CODE= STUB_OPEN_CODE= STUB_SESSION_CODE=
 printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
 : > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"
 : > "$STUB_PR_FAIL"
@@ -1472,6 +1473,16 @@ check "a session id that is not an id — refused" 1 "$RC"
 check "before anything is asked"       0 "$(grep -c '/sessions/' "$STUB_CALLS")"
 ship_state
 printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
+# A SESSION THAT COULD NOT BE READ IS NEITHER OPEN NOR CLOSED: treating it as
+# open ships on a session that may be closed, and treating it as closed opens a
+# second one. So the run stops, and nothing is opened or written.
+printf '{"message":"the backlog is having a moment"}' > "$STUB_SESSION"
+STUB_SESSION_CODE=500 run_ship --prepare
+check "a session that cannot be read — exits non-zero" 1 "$RC"
+check "and says it could not read it"  1 "$(shipped | grep -c 'Could not read session s-1')"
+check "the state file is left as it was" s-1 "$(cat "$SDIR2/session")"
+check "and no session was opened"      0 "$(opened | grep -c .)"
+printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
 
 echo
 echo " --close must REFUSE an invented close:"
@@ -1706,6 +1717,63 @@ check "the driver points at that list" 1 "$(grep -c 'driver-events\.md' "$AGENTS
 check "and names every event on it" none \
   "$(printf '%s\n' "$LISTED" | while read -r e; do
        [ -n "$e" ] && ! grep -q "\`$e\`" "$AGENTS/driver.md" && printf '%s ' "$e"; done | sed 's/ $//' | grep . || echo none)"
+
+# --- the two version checks (335) -----------------------------------------
+echo
+echo "check-version"
+echo
+# BOTH SCRIPTS, COPIED INTO A THROWAWAY REPOSITORY, because each reads the repo
+# it sits in (`git -C` its own directory) and the cases need a main and
+# branches this checkout does not have. The copy is the file as it is now, so a
+# check broken here is a check broken in guards.yml. mcp/ is beside plugin/ in
+# this repository, which is where guards.yml and release.yml run this suite.
+VREPO="$STUB/versions"
+vgit() { git -C "$VREPO" -c user.name=t -c user.email=t@t "$@"; }
+git init -q -b main "$VREPO"
+vgit config commit.gpgsign false
+mkdir -p "$VREPO/plugin/.claude-plugin" "$VREPO/plugin/hooks" "$VREPO/mcp/lib"
+cp "$HERE/../check-version.sh" "$VREPO/plugin/check-version.sh"
+cp "$HERE/../../mcp/check-version.sh" "$VREPO/mcp/check-version.sh"
+printf '{"version":"1.0.0"}\n' > "$VREPO/plugin/.claude-plugin/plugin.json"
+printf '{"version":"1.0.0"}\n' > "$VREPO/mcp/package.json"
+echo a > "$VREPO/plugin/hooks/a.sh"; echo a > "$VREPO/mcp/lib/a.mjs"; echo a > "$VREPO/README.md"
+vgit add -A && vgit commit -qm fork
+# One branch per case, all cut from the same fork; `ahead` is main after its own
+# later bump, the base for the two cases about a branch cut before it.
+vbranch() { # vbranch <name> <from> <version|-> <file>...  — one commit
+  local name=$1 from=$2 version=$3 f; shift 3
+  vgit checkout -q -b "$name" "$from"
+  for f in "$@"; do echo "$name" >> "$VREPO/$f"; done
+  if [ "$version" != - ]; then
+    printf '{"version":"%s"}\n' "$version" > "$VREPO/plugin/.claude-plugin/plugin.json"
+    printf '{"version":"%s"}\n' "$version" > "$VREPO/mcp/package.json"
+  fi
+  vgit add -A && vgit commit -qm "$name"
+}
+vbranch ahead     main 1.0.1 plugin/hooks/a.sh mcp/lib/a.mjs
+vbranch nobump    main -     plugin/hooks/a.sh mcp/lib/a.mjs
+vbranch bumped    main 1.0.1 plugin/hooks/a.sh mcp/lib/a.mjs
+vbranch untouched main -     README.md
+vbranch downgrade main 0.9.0 plugin/hooks/a.sh mcp/lib/a.mjs
+vgit checkout -q main
+# The verdict is the exit code: pass or refuse. Anything else the script says
+# is kept in $VOUT for the cases that read the sentence.
+VOUT="$STUB/version-out"
+vcheck() { # vcheck <plugin|mcp> <base> <head> -> pass|refuse
+  if "$VREPO/$1/check-version.sh" "$2" "$3" > "$VOUT" 2>&1; then echo pass; else echo refuse; fi
+}
+for s in plugin mcp; do
+  src=plugin/hooks/a.sh; [ "$s" = mcp ] && src=mcp/lib/a.mjs
+  check "$s: changed with no bump is refused"         refuse "$(vcheck "$s" main nobump)"
+  check "and the refusal names what changed"           1      "$(grep -c "$src" "$VOUT")"
+  check "$s: changed and bumped passes"                pass   "$(vcheck "$s" main bumped)"
+  check "$s: untouched passes"                         pass   "$(vcheck "$s" main untouched)"
+  check "$s: a downgrade is refused"                   refuse "$(vcheck "$s" main downgrade)"
+  # The branch bumped to 1.0.1, and so did main after the branch was cut.
+  check "$s: a stale branch bumping to main's number is refused" refuse "$(vcheck "$s" ahead bumped)"
+  # Main's own later change and bump are not the branch's.
+  check "$s: main bumped and the branch untouched passes" pass "$(vcheck "$s" ahead untouched)"
+done
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; exit 1; fi
