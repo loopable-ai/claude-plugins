@@ -1367,6 +1367,19 @@ MISSING=$(
 )
 MISSING=${MISSING% }
 check "every script and agent the driver names exists" none "${MISSING:-none}"
+# THE DRIVER'S EVENTS ARE A FIXED LIST (337), read by name by whatever counts
+# them, so the list and the prose that posts them cannot drift: the list keeps
+# the six the brief named, the driver points at the list, and names every
+# event on it. An event dropped from the prompt is one nobody posts.
+EVENTS="$HERE/../skills/loopable/driver-events.md"
+LISTED=$(sed -n 's/^### `\([a-z_]*\)`$/\1/p' "$EVENTS" 2>/dev/null)
+check "the driver's events are listed in one place" none \
+  "$(for e in builder_started fix_round merged handed_off brief_defect start_refused; do
+       printf '%s\n' "$LISTED" | grep -qx "$e" || printf '%s ' "$e"; done | sed 's/ $//' | grep . || echo none)"
+check "the driver points at that list" 1 "$(grep -c 'driver-events\.md' "$AGENTS/driver.md" | sed 's/^[1-9][0-9]*$/1/')"
+check "and names every event on it" none \
+  "$(printf '%s\n' "$LISTED" | while read -r e; do
+       [ -n "$e" ] && ! grep -q "\`$e\`" "$AGENTS/driver.md" && printf '%s ' "$e"; done | sed 's/ $//' | grep . || echo none)"
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; exit 1; fi

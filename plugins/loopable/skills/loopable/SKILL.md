@@ -132,6 +132,11 @@ So `post_activity` is for the things a hook cannot know: a decision you made and
 why, something that turned out to be harder than the item said, a question you
 are about to ask. Write those for a person watching the console, plainly.
 
+The driver's judgements — a builder started, a fix round, a merge, a hand-off —
+are a fixed list of events with structured fields in the activity's `ref`, so
+they can be counted and not only read: `driver-events.md`, beside this file, is
+that list and says which session each goes on.
+
 What the hooks will **not** do is close the session. A `complete` close is a
 claim — brief revision, HEAD sha, verifier verdict, every criterion accounted
 for, screenshots, cost — and a hook watching a process end knows none of it. A

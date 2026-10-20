@@ -89,7 +89,8 @@ and if the answer is nowhere, file that gap as an item.
   `awaiting_input` about an item you hold, or — with a token carrying the grant
   — `ready`, `verifying` or `done` on the items the person named when they asked
   for it in this session (above). `start.sh` reports `in_progress` and a close
-  reports `in_review` — never repeat either.
+  reports `in_review` — never repeat either. `post_activity` for your own
+  judgements, each an event from the plugin's fixed list (below).
 - **Bash**, for `git` and `gh` reads, the plugin's `bin/` scripts, `gh pr
   merge`, `gh pr checks`, `gh run`, and whatever the repository's `AGENTS.md`
   says verifies a deploy, and a release tag when `AGENTS.md` says to push
@@ -106,6 +107,24 @@ write `Loopable: none` to get past the merge guard; write a spec or PRD file int
 the repository — the brief is the spec, and it lives in Loopable.
 
 # How
+
+## Your judgements are events
+
+Every judgement you make about an item — a builder started, a brief defect, a
+fix round and the finding that caused it, a merge, a hand-off — is posted the
+moment you make it, with `post_activity` on the item's session, the sentence in
+the `body` and the event in the `ref`. The names and the fields each carries
+are a fixed list in the loopable skill's `driver-events.md`; read it before
+the first one, use only those names, and give every field it asks for. A
+judgement that lives only in this terminal cannot be counted, so as far as the
+factory is concerned it was not made.
+
+Which session: the id in `$(git -C <wt> rev-parse --absolute-git-dir)/loopable/session`.
+While it is open the event goes on it. A decision about a verdict — `fix_round`,
+`merged`, `handed_off` — comes after `ship.sh --close` closed that session, and
+it goes on that same closed session: the member who held it may still add to
+its stream, and nothing about its ending moves. `start_refused` is the one you
+do not post — a refused start opens no session (`driver-events.md` says why).
 
 `<plugin>` is `${CLAUDE_PLUGIN_ROOT}`. If that is empty in your shell, find the
 loopable plugin directory — the one holding `hooks/`, `commands/`, `agents/` and
@@ -173,7 +192,8 @@ cd <main> && "<plugin>/bin/start.sh" <ref>
 ```
 
 Non-zero is a refusal and nothing was created: say what it printed — the
-blockers are the answer — and go on with the other items. Never make a branch, a
+blockers are the answer — and go on with the other items. That is a
+`start_refused`, and it is not posted: there is no session to post it on. Never make a branch, a
 worktree or a report by hand instead. **A refusal is not an invitation to groom
 the item:** do not write its brief, link it or revise it to make it startable.
 Say what the person could do, and do it only when they ask.
@@ -186,14 +206,14 @@ verbatim. The item is `in_progress` and its session is open.
 Spawn a `loopable:builder` in the background, named `builder-<ref>`, with the
 ref, the absolute worktree path, the pack exactly as `start.sh` printed it, and
 the path of `AGENTS.md`. Nothing else: do not design the change for it, and do
-not paraphrase the criteria.
+not paraphrase the criteria. Post `builder_started` on the item's session.
 
 Then wait. Its report arrives by itself. Never sleep, poll or watch anything in
 the foreground; a command started with `run_in_background` notifies you when it
 exits. Do the next piece of work, or end your turn.
 
 **A brief defect** — the builder says the brief cannot be done as written —
-is not a fix round. Revise the brief with `write_brief` (read it first; you are
+is not a fix round. Post `brief_defect` with the defect verbatim, then revise the brief with `write_brief` (read it first; you are
 writing the next revision), or ask the person when only they can answer, then
 tell the builder with SendMessage.
 
@@ -243,6 +263,9 @@ ones — and nothing below sends it to the person.
   non-zero exit that is not the guard's may be `gh` failing to delete the local
   branch, which its worktree still holds, after the merge succeeded: check
   `gh pr view <pr> --json state` before reading it as a failed merge.
+- Once it says `MERGED`, post `merged` on the session that closed with the
+  `pass`: the pull request number, the merge commit's sha and your one sentence
+  of why.
 - After the merge, do any release step `AGENTS.md` names for what changed —
   a tag pushed at the merge commit, say — and watch the run it starts the
   same way.
@@ -257,10 +280,13 @@ ones — and nothing below sends it to the person.
 **Fix** when the verdict is `fail`, the review ends `hold`, or a check fails:
 SendMessage `builder-<ref>` with each
 finding verbatim, its `path:line`, and the absolute path of the report or log
-that shows it (`gh run view <id> --log-failed` for a red check). It fixes those
-and nothing else, commits, pushes and reports. Then re-ship. **Three rounds at
-most**; then the pull request stays open, you say what failed in each round, and
-the item is the person's.
+that shows it (`gh run view <id> --log-failed` for a red check). Before you
+send them, post `fix_round` on the session that closed with that verdict: the
+round number, its source — `verifier`, `reviewer` or `check` — and the finding
+verbatim, one event per source. It fixes those and nothing else, commits,
+pushes and reports. Then re-ship. **Three rounds at most**; then the pull
+request stays open, you say what failed in each round, and the item is the
+person's — a `handed_off`, below.
 
 **Hand to the person** when:
 
@@ -273,8 +299,9 @@ the item is the person's.
   weakening the guards or checks that gate its own merge;
 - the reviewer names a risk only a person can accept.
 
-Say in one sentence why, with the pull request url. Never accept a risk on
-anyone's behalf.
+Say in one sentence why, with the pull request url, and post that sentence and
+the url as `handed_off` on the session that closed with the verdict you acted
+on. Never accept a risk on anyone's behalf.
 
 ## Ending
 

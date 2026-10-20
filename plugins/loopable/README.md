@@ -393,11 +393,11 @@ A person may mint their token on `/tokens` with the grant to set `ready`,
 asks for it in the session and names the items, never on its own.
 
 **It never edits.** The lead that writes code stops judging it, so every change
-is a `builder`'s, one per item, in that item's worktree. The driver's
-`disallowedTools` takes its editors away — `guard-main.sh` would not, since a
-session in the main checkout may edit inside a worktree — and keeps everything
-else, because the MCP's tool names differ between a plugin install and a
-project `.mcp.json` and a list of them would be wrong in one. The builder's
+is a `builder`'s, one per item, in that item's worktree. That is how the driver
+works, not a tool taken away: it keeps Edit and Write, because a
+`disallowedTools` list on the driver reaches the agents it spawns, and a
+builder without an editor cannot build — `test.sh` goes red if the list comes
+back. The builder's
 tool list is editors and Bash, **no MCP and no Agent** — `start.sh` claimed the
 item and `ship.sh` closes it, and a builder reporting on its own work is exactly
 the sentence the close contract replaced. That takes the obvious paths away,
@@ -407,6 +407,15 @@ no merge without a `pass` at the head going in. It commits and pushes
 its branch, which `/loopable:ship` will not do for a person: starting the driver
 is the person delegating that, and nothing reaches `main` past the verifier,
 the reviewer and the guard.
+
+**Its judgements are events in the session.** A builder started, a brief
+defect, each fix round and the finding behind it, a merge and a hand-off are
+each a `post_activity` with the event in the `ref` — a fixed list of names and
+fields in `skills/loopable/driver-events.md`, which `test.sh` holds the driver
+to. A decision about a verdict comes after `ship.sh --close`, so it goes on the
+session that closed with that verdict: its holder may still add to a closed
+session's stream, and nothing about the ending moves. A refused start opens no
+session, so `start_refused` is listed and not yet posted.
 
 **Its memory is the backlog**, not a file of its own: status notes, sessions
 and close contracts are what the next session reads. `test.sh` checks that every
