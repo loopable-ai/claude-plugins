@@ -1342,14 +1342,14 @@ for a in verifier reviewer; do
   check "and no editor is among them" none \
     "$(printf '%s\n' "$T" | grep -xE 'Edit|Write|MultiEdit|NotebookEdit' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
 done
-# THE DRIVER JUDGES, so it has no editor either. It keeps every other tool —
-# it needs Agent, SendMessage and an MCP whose tool names differ between a
-# plugin install and a project .mcp.json — so its editors are taken away by
-# name rather than its tools listed.
+# THE DRIVER KEEPS ITS EDITORS. It leaves edits to builders by practice, not
+# by a denied list: `disallowedTools` on the driver reaches the agents it
+# spawns, and a builder that cannot Edit or Write cannot build. So the driver
+# denies no editor, and putting the list back turns this red.
 D=$(fm "$AGENTS/driver.md" | sed -n 's/^disallowedTools: //p' | tr ',' '\n' | tr -d ' ')
-check "the driver is denied every editor" "Edit MultiEdit NotebookEdit Write" \
+check "the driver denies no editor its builders need" none \
   "$(printf '%s\n' Edit Write MultiEdit NotebookEdit | while read -r t; do
-       printf '%s\n' "$D" | grep -qx "$t" || continue; printf '%s\n' "$t"; done | sort | tr '\n' ' ' | sed 's/ $//')"
+       printf '%s\n' "$D" | grep -qx "$t" || continue; printf '%s\n' "$t"; done | sort | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
 # The builder edits; it does not report on its own work or spawn its checkers.
 T=$(tools_of "$AGENTS/builder.md")
 check "the builder lists its tools"  yes "$([ -n "$T" ] && echo yes || echo no)"
