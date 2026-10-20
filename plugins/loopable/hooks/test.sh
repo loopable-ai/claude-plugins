@@ -115,6 +115,10 @@ case "$U" in
     [ -s "${STUB_OPEN_ERR:-/dev/null}" ] && answer "$(cat "$STUB_OPEN_ERR")" "${STUB_OPEN_CODE:-409}"
     answer '{"session":{"id":"s-new"}}' 201 ;;
   */sessions\?*)   answer "$(cat "${STUB_SESSIONS:-/dev/null}")" ;;
+  # ONE SESSION, open or closed (333): ship.sh --prepare asks before it ships,
+  # because a session closes once and a fix round needs the next one. LAST, so
+  # every `*/sessions/*/<thing>` above keeps its own door.
+  */sessions/*)    answer "$(cat "${STUB_SESSION:-/dev/null}")" ;;
 esac
 exit 22
 CURL
@@ -126,8 +130,9 @@ export STUB_HEAD="$STUB/head" STUB_ITEM="$STUB/item"
 export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
 export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
 export STUB_ATT_N="$STUB/attn" STUB_CLOSE_ERR="$STUB/closeerr"
-export STUB_OPEN_ERR="$STUB/openerr"
+export STUB_OPEN_ERR="$STUB/openerr" STUB_SESSION="$STUB/session"
 export STUB_CLOSE_CODE= STUB_OPEN_CODE=
+printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
 : > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"
 : > "$STUB_PR_FAIL"
 printf '0' > "$STUB_ATT_N"
@@ -1418,6 +1423,55 @@ check "and where the reports go"       1 "$(shipped | grep -c 'Where the reports
 # LAST RUN'S REPORT IS THIS RUN'S LIE — it described another commit.
 check "a stale report is cleared"      0 "$([ -e "$SDIR2/verify.json" ] && echo 1 || echo 0)"
 check "and it says it cleared it"      1 "$(shipped | grep -c 'previous run')"
+
+echo
+echo " --prepare ships on an open session, and opens the next after a close:"
+# The POSTs that open a session — the path ends at /sessions, nothing after.
+opened() { awk -F'\t' '$1 == "POST" && $2 ~ /\/sessions$/ {print $3}' "$STUB_CALLS"; }
+run_ship --prepare
+check "an open session — exits 0"      0 "$RC"
+check "it asked the API about it"      1 "$(awk -F'\t' '$1 == "GET" && $2 ~ /\/sessions\/s-1$/' "$STUB_CALLS" | grep -c .)"
+# THE ONE-OPEN-PER-ITEM INDEX IS NEVER HIT: an open session is not replaced.
+check "and opened no other"            0 "$(opened | grep -c .)"
+check "the state file is untouched"    s-1 "$(cat "$SDIR2/session")"
+check "and says nothing about a new one" 0 "$(shipped | grep -c 'was closed')"
+
+printf '{"session":{"id":"s-1","state":"complete","closed_at":"2026-10-19 12:00:00",
+  "harness":"claude-code","repo":"loopable-ai/platform","branch":"feat/loopable-ship-99"}}' > "$STUB_SESSION"
+run_ship --prepare
+check "a closed session — exits 0"     0 "$RC"
+check "the next one is opened, once"   1 "$(opened | grep -c .)"
+check "on the same item, harness, repo and branch" \
+  "$SHIP_ITEM claude-code loopable-ai/platform feat/loopable-ship-99" \
+  "$(opened | jq -r '[.item_id, .harness, .repo, .branch] | join(" ")')"
+check "its id goes into the state file" s-new "$(cat "$SDIR2/session")"
+check "and it says so, in one line"    1 "$(shipped | grep -c 'Session s-1 was closed.*opened s-new')"
+check "the printout names the new one" 1 "$(shipped | grep -cE '^  session +s-new$')"
+# A second --prepare reads s-new, which the API says is open: no third session.
+printf '{"session":{"id":"s-new","state":"active","closed_at":null}}' > "$STUB_SESSION"
+run_ship --prepare
+check "and a second --prepare opens nothing" 0 "$(opened | grep -c .)"
+
+ship_state
+printf '{"session":{"id":"s-1","state":"complete","closed_at":"2026-10-19 12:00:00"}}' > "$STUB_SESSION"
+printf '{"message":"a session is already open on this item — t on feat/x"}' > "$STUB_OPEN_ERR"
+run_ship --prepare
+check "a refused open — exits non-zero" 1 "$RC"
+check "and says the API's sentence"    1 "$(shipped | grep -c 'already open on this item')"
+check "the state file is left as it was" s-1 "$(cat "$SDIR2/session")"
+# The API's answer becomes a file the next run puts in a path: an id, or nothing.
+printf '{"session":{"id":"s-2/../../x"}}' > "$STUB_OPEN_ERR"
+STUB_OPEN_CODE=201 run_ship --prepare
+check "a new id that is not an id — refused" 1 "$RC"
+check "and never written"              s-1 "$(cat "$SDIR2/session")"
+: > "$STUB_OPEN_ERR"
+
+printf 's-1/../../x' > "$SDIR2/session"
+run_ship --prepare
+check "a session id that is not an id — refused" 1 "$RC"
+check "before anything is asked"       0 "$(grep -c '/sessions/' "$STUB_CALLS")"
+ship_state
+printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
 
 echo
 echo " --close must REFUSE an invented close:"

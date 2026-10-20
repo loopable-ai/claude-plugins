@@ -306,7 +306,9 @@ is code, for start.sh's reason.
 command that fixes it: no session in this worktree (`/loopable:start` first), an
 uncommitted tree, a branch that is not pushed. **It commits nothing and pushes
 nothing** — a close says "I verified THIS commit", and a script that committed on
-the way past would be closing at a commit no verifier ever saw. Then it clears
+the way past would be closing at a commit no verifier ever saw. A session closes
+once, so when the one on record has closed — a fix round — it opens the next on
+the same item, harness, repo and branch and records it. Then it clears
 the reports from any previous run — a `verify.md` describing a commit that has
 since moved is exactly what the merge guard's sha rule exists to catch — and
 prints the item, the criteria with their verify methods, the environments, the

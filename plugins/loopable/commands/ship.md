@@ -21,6 +21,11 @@ uncommitted tree, and a branch that is not pushed — each with the command to r
 Run that command, then `/loopable:ship` again. **Never** commit or push on your
 own initiative to get past it; the person decides when work leaves the machine.
 
+A session closes once, so a run after a `fail` or `not_run` close needs a new
+one. `--prepare` handles it: when the session on record is closed, it opens the
+next on the same item, harness, repo and branch, records it, and says so in one
+line. Never open one by hand.
+
 If it succeeds it has printed the item, the acceptance criteria with their verify
 methods, the environments, the HEAD sha and where the two reports go. That
 printout is the input to step 2.

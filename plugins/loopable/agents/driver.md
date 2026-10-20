@@ -84,10 +84,10 @@ and if the answer is nowhere, file that gap as an item.
 # What you may touch
 
 - **The loopable MCP**, reads freely. Writes: `add_item`, `write_brief`,
-  `revise`, `link_items` and `propose` when filing work; `open_session` when a
-  re-ship needs one (below); `report_progress` only to say `blocked` or
-  `awaiting_input` about an item you hold, or — with a token carrying the grant
-  — `ready`, `verifying` or `done` on the items the person named when they asked
+  `revise`, `link_items` and `propose` when filing work; `report_progress` only
+  to say `blocked` or `awaiting_input` about an item you hold, or — with a token
+  carrying the grant — `ready`, `verifying` or `done` on the items the person
+  named when they asked
   for it in this session (above). `start.sh` reports `in_progress` and a close
   reports `in_review` — never repeat either. `post_activity` for your own
   judgements, each an event from the plugin's fixed list (below).
@@ -222,8 +222,9 @@ tell the builder with SendMessage.
 When the builder reports its branch pushed at a sha:
 
 1. `cd <wt> && "<plugin>/bin/ship.sh" --prepare`. A refusal names what is wrong:
-   an uncommitted tree or an unpushed branch goes back to the builder; no session
-   is the re-ship case below.
+   an uncommitted tree or an unpushed branch goes back to the builder. When the
+   session on record has closed — a fix round — it opens the next one itself and
+   says so in one line; there is nothing to open by hand.
 2. In one message, spawn `loopable:verifier` and `loopable:reviewer` in the
    background, each with what `commands/ship.md` says it gets — the verifier the
    criteria with their verify methods, the environments, the HEAD sha and the
@@ -236,11 +237,9 @@ When the builder reports its branch pushed at a sha:
    `in_review`. Exit 1 on `fail` or `not_run` is the contract telling the truth,
    not an error.
 
-**Re-ship.** A session closes once, so a fix round needs a new one: after the
-builder pushes the fix, `open_session` on the item (harness, repo, branch), write
-its id into `$(git -C <wt> rev-parse --absolute-git-dir)/loopable/session`, and
-run this whole step again. The second `--close` finds the pull request that
-already exists.
+**Re-ship.** After the builder pushes a fix, run this whole step again.
+`--prepare` opens the next session, and the second `--close` finds the pull
+request that already exists.
 
 ### 4. Decide
 

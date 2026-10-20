@@ -14,9 +14,10 @@
 # seven of them, and the one it drops will be the one with a refusal in it.
 #
 # --prepare  refuses what cannot be shipped (no session, a dirty tree, a
-#            branch nobody has pushed), clears any report left over from a
-#            previous run, and prints the pack, the HEAD sha and the exact
-#            shape the two reports must have.
+#            branch nobody has pushed), opens the next session when the one
+#            on record has closed (a fix round), clears any report left over
+#            from a previous run, and prints the pack, the HEAD sha and the
+#            exact shape the two reports must have.
 # --close    reads the two reports, uploads them and the screenshots as
 #            attachments on the session, opens the pull request naming the
 #            item, closes the session with the contract AND that url, and says
@@ -206,6 +207,37 @@ if [ "$MODE" = prepare ]; then
   PACK=$(printf '%s' "$ANSWER" | jq -c '.pack // empty' 2>/dev/null)
   [ -n "$PACK" ] || die "The pack for $ITEM came back empty. Nothing has been changed."
   field() { printf '%s' "$PACK" | jq -r "$1 // empty"; }
+
+  # A SESSION CLOSES ONCE, so a fix round after a `fail` or `not_run` close has
+  # to ship on a new one — and that step used to be prose in the driver, which a
+  # person shipping by hand had to rediscover. So the state file's session is
+  # ASKED about, not assumed: `closed_at` is the fact the one-open-per-item index
+  # is partial on, and only a session the API says is closed is replaced. An open
+  # one is left alone, which is what keeps this from ever meeting that index.
+  # The ids on record were checked above; the new one is checked the same way
+  # before it becomes a file.
+  SESS=$(api GET "/agent/projects/$PROJECT/sessions/$SESSION") || die \
+    "Could not read session $SESSION ($(api_message "$SESS")). Nothing has been changed."
+  if [ -n "$(printf '%s' "$SESS" | jq -r '.session.closed_at // empty' 2>/dev/null)" ]; then
+    # The same item, harness, repo and branch as the run it follows; what the
+    # closed row does not say is what start.sh would have said.
+    S_HARNESS=$(printf '%s' "$SESS" | jq -r '.session.harness // empty')
+    S_REPO=$(printf '%s' "$SESS" | jq -r '.session.repo // empty')
+    S_BRANCH=$(printf '%s' "$SESS" | jq -r '.session.branch // empty')
+    OPEN=$(jq -nc --arg i "$ITEM" --arg h "${S_HARNESS:-claude-code}" \
+      --arg r "${S_REPO:-$(basename "$WORKTREE")}" --arg b "${S_BRANCH:-$BRANCH}" \
+      '{item_id: $i, harness: $h, repo: $r, branch: $b}')
+    OPENED=$(api POST "/agent/projects/$PROJECT/sessions" "$OPEN") || die \
+      "Session $SESSION is closed, and opening the next one was refused ($(api_message "$OPENED")).
+Nothing has been changed."
+    NEXT=$(printf '%s' "$OPENED" | jq -r '.session.id // empty' 2>/dev/null)
+    loopable_id_ok "$NEXT" || die \
+      "Session $SESSION is closed, and the API's answer to opening the next one named no session id."
+    loopable_state_put session "$NEXT" || die \
+      "Opened session $NEXT, but could not write it into $STATE/session — put it there by hand."
+    say "Session $SESSION was closed, so this run ships on a new one: opened $NEXT and recorded it in $STATE/session."
+    SESSION=$NEXT
+  fi
 
   # LAST RUN'S REPORTS ARE THIS RUN'S LIE. A verify.md written at a commit
   # that has since moved is exactly the failure the merge guard's sha rule
