@@ -50,8 +50,11 @@ works, and do not edit what they return. A report you corrected is your report.
 ```
 
 It reads the two reports, attaches them and the screenshots to the Loopable
-session, opens the pull request with the criteria checklist and `Loopable: <ref>`
-in its body, and then closes the session with the contract — brief revision,
+session, and finishes the pull request. When the branch already has one — the
+draft a builder opens on its first push — it posts the verification and the
+review as one comment and runs `gh pr ready`, and never edits its title or body.
+When it has none, it opens one with the criteria checklist and `Loopable: <ref>`
+in its body. Then it closes the session with the contract — brief revision,
 HEAD sha, verdict and reason, every criterion with where it landed and whether
 it is met, the screenshot ids, the cost, and that pull request's url. The pull
 request comes first because a closed session is never updated again, so the

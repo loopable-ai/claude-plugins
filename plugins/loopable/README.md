@@ -334,7 +334,7 @@ verifier's evidence, and gathering it in a review would blur the line that makes
 both reports worth reading.
 
 **Everything lands under `.git/loopable/`** — the reports, the evidence
-directory, the pull request body — for the reason the item and session ids do:
+directory, the pull request body and comment — for the reason the item and session ids do:
 a file the git directory owns cannot be committed, so there is no `.gitignore`
 rule to add and none to remove.
 
@@ -351,9 +351,14 @@ sometimes not:
    seventh register for this (`session`), because a run's exhaust is not a
    knowledge register: the session already is the row for "this run, on this
    item, at this sha".
-3. **Opens the pull request**, titled from the item and bodied with the ask, the
-   criteria as a ticked checklist, the verdict, the reviewer's last line and
-   `Loopable: <ref>`. `--trailer '<line>'` appends a harness's own session link;
+3. **Finishes the pull request.** When the branch has one already — the draft a
+   builder opens on its first push, so CI runs while the verifier works — the
+   title and body are the builder's and are never edited: the criteria as a
+   ticked checklist, the verdict and the reviewer's last line go on it as ONE
+   comment naming the HEAD it is about, and `gh pr ready` takes it out of draft.
+   When it has none, it **opens** one, titled from the item and bodied with the
+   ask, that same checklist, verdict and last line, and `Loopable: <ref>`.
+   `--trailer '<line>'` appends a harness's own session link to either;
    a script cannot know one. **Before the close, and that order is deliberate**:
    the close takes the url and a closed session is never updated again, so this
    is the only moment the link can be recorded. It also means a `gh` that fails

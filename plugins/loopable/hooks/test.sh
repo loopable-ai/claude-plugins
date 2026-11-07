@@ -44,18 +44,29 @@ case "$*" in
   # A `pr create` that FAILS is a path of its own since 256: the close happens
   # anyway, naming no url. The fixture decides, because the host may or may
   # not have a real gh and neither answer may be borrowed from it.
-  *"pr create"*)
-    if [ -s "${STUB_PR_FAIL:-/dev/null}" ]; then
+  # A comment and a ready are paths of their own since 362: a pull request the
+  # builder opened as a draft is commented on and marked ready, never edited.
+  # STUB_GH_REFUSE names the one verb that fails, for the cases about that.
+  *"pr create"*|*"pr edit"*|*"pr comment"*|*"pr ready"*)
+    if [ "$2" = create ] && [ -s "${STUB_PR_FAIL:-/dev/null}" ]; then
       cat "$STUB_PR_FAIL" >&2; exit 1
-    fi ;&
-  *"pr edit"*)
+    fi
+    if [ "$2" = "${STUB_GH_REFUSE:-}" ]; then
+      printf 'could not %s: the stub refused\n' "$2" >&2; exit 1
+    fi
     f=$(body_file "$@")
-    [ -n "$f" ] && cp "$f" "${STUB_PR_SENT:-/dev/null}"
+    sent=${STUB_PR_SENT:-/dev/null}
+    [ "$2" = comment ] && sent=${STUB_PR_COMMENT:-/dev/null}
+    [ -n "$f" ] && cp "$f" "$sent"
     # Recorded into the same log curl writes, so a case can assert that the
     # pull request was opened BEFORE the close and not merely that both
-    # happened — which since S1.3+256 is the whole point of the order.
-    [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr\t\n' >> "$STUB_CALLS"
-    printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
+    # happened — which since S1.3+256 is the whole point of the order. The
+    # verb rides along, because which ones ran is the point of 362.
+    [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr %s\t\n' "$2" >> "$STUB_CALLS"
+    case $2 in
+      create|edit) printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
+      comment) printf 'https://github.com/wearewebera/sanfrancisco/pull/700#issuecomment-1\n' ;;
+    esac ;;
   *) exit 1 ;;
 esac
 GH
@@ -130,11 +141,13 @@ export STUB_SESSIONS="$STUB/sessions" STUB_CALLS="$STUB/calls"
 export STUB_HEAD="$STUB/head" STUB_ITEM="$STUB/item"
 export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
 export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
+export STUB_PR_COMMENT="$STUB/prcomment" STUB_GH_REFUSE=
 export STUB_ATT_N="$STUB/attn" STUB_CLOSE_ERR="$STUB/closeerr"
 export STUB_OPEN_ERR="$STUB/openerr" STUB_SESSION="$STUB/session"
 export STUB_CLOSE_CODE= STUB_OPEN_CODE= STUB_SESSION_CODE=
 printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
 : > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"
+: > "$STUB_PR_COMMENT"
 : > "$STUB_PR_FAIL"
 printf '0' > "$STUB_ATT_N"
 printf '{"sessions":[]}' > "$STUB_SESSIONS"; : > "$STUB_CALLS"
@@ -1380,12 +1393,14 @@ report() { # report <verdict> <c1 status> <c2 status> [reason]
 }
 
 run_ship() { # run_ship <--prepare|--close> -> RC; output in $STUB/shipout
-  : > "$STUB_CALLS"; : > "$STUB_PR_SENT"; printf '0' > "$STUB_ATT_N"
+  : > "$STUB_CALLS"; : > "$STUB_PR_SENT"; : > "$STUB_PR_COMMENT"; printf '0' > "$STUB_ATT_N"
   ( cd "$SHP" && "$HERE/../bin/ship.sh" "$@" ) > "$STUB/shipout" 2>&1
   RC=$?
 }
 shipped() { cat "$STUB/shipout"; }
 closed_payload() { awk -F'\t' '$1 == "POST" && $2 ~ /\/close$/ {print $3}' "$STUB_CALLS"; }
+# How many times one `gh pr <verb>` ran, from the log the stub keeps.
+gh_ran() { awk -F'\t' -v v="pr $1" '$1 == "GH" && $2 == v' "$STUB_CALLS" | grep -c .; }
 
 echo " --prepare must REFUSE what cannot be shipped:"
 rm -f "$SDIR2/item" "$SDIR2/session"
@@ -1582,6 +1597,10 @@ check "and carries the criteria, ticked" 2 "$(grep -c '^- \[x\]' "$STUB_PR_SENT"
 check "and the reviewer's last word"   1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_SENT")"
 check "the title comes from the item, without its code" 1 \
   "$(shipped | grep -c 'Opened https')"
+# WITH NO PULL REQUEST, TODAY'S PATH AND ONLY IT (362): one create, and nothing
+# of the existing-PR path — its body already carries what a comment would.
+check "with no PR, one gh pr create"   1 "$(gh_ran create)"
+check "and no comment, ready or edit"  "0 0 0" "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
 
 # THE TRAILER: the repository's own session attribution, passed in rather than
 # guessed at — a script cannot know a harness's session url.
@@ -1589,6 +1608,56 @@ report pass met met
 run_ship --close --trailer 'https://claude.ai/code/session_test'
 check "a trailer lands as the last line" 'https://claude.ai/code/session_test' \
   "$(tail -1 "$STUB_PR_SENT")"
+
+echo
+echo " a pull request the builder opened — commented on and marked ready, never edited:"
+# THE BUILDER OPENS A DRAFT ON ITS FIRST PUSH (362), so CI runs while the
+# verifier works, and its body — its own summary and `Loopable: <ref>` — is the
+# body. --close adds to that pull request and rewrites nothing: an edit is a
+# second writer of a body the merge guard reads.
+EXISTING=https://github.com/wearewebera/sanfrancisco/pull/701
+report pass met met
+printf '%s\n' "$EXISTING" > "$STUB_PR_URL"
+run_ship --close --trailer 'https://claude.ai/code/session_test'
+check "an existing PR — exits 0"       0 "$RC"
+check "gh pr edit is never run"        0 "$(gh_ran edit)"
+check "the body is left as it was"     0 "$(grep -c . "$STUB_PR_SENT")"
+check "no second pull request is opened" 0 "$(gh_ran create)"
+check "ONE comment is posted"          1 "$(gh_ran comment)"
+check "carrying the verification"      1 "$(grep -c '^## Verification' "$STUB_PR_COMMENT")"
+check "with the criteria, ticked"      2 "$(grep -c '^- \[x\]' "$STUB_PR_COMMENT")"
+check "and the review's last word"     1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_COMMENT")"
+# A pull request outlives a run: the next push makes the next comment, so each
+# says which commit it is about.
+check "naming the commit it is about"  1 "$(grep -cF "${SHIP_HEAD:0:12}" "$STUB_PR_COMMENT")"
+check "and the trailer, last"          'https://claude.ai/code/session_test' "$(tail -1 "$STUB_PR_COMMENT")"
+# The item is named once, in the body the builder wrote, which is where the
+# merge guard reads it.
+check "the comment does not name the item again" 0 "$(grep -c '^Loopable:' "$STUB_PR_COMMENT")"
+check "then gh pr ready, once"         1 "$(gh_ran ready)"
+check "the comment comes before the ready" 1 \
+  "$(awk -F'\t' '$2 == "pr comment" {c = NR} $2 == "pr ready" {r = NR} END {print (c && r && c < r) ? 1 : 0}' "$STUB_CALLS")"
+check "and both before the session closed" 1 \
+  "$(awk -F'\t' '$1 == "GH" {g = NR} $2 ~ /\/close$/ {c = NR} END {print (g && c && g < c) ? 1 : 0}' "$STUB_CALLS")"
+P=$(closed_payload)
+check "the close carries THAT pull request's url" "$EXISTING" "$(printf '%s' "$P" | jq -r '.pr_url')"
+check "and says what it did to it"     1 "$(shipped | grep -c "Commented on $EXISTING")"
+
+# A COMMENT OR A READY THAT FAILS IS NOT FATAL, the rule for every gh call
+# here: the session closes with the url it has, and the run says what is left
+# and exits non-zero, because the pull request is not what it should be.
+report pass met met
+STUB_GH_REFUSE=comment run_ship --close
+check "a refused comment — exits non-zero" 1 "$RC"
+check "and the session closes all the same" "$EXISTING" "$(closed_payload | jq -r '.pr_url')"
+check "the comment is left where a person can post it" 1 "$(shipped | grep -c 'gh pr comment .*pr-comment.md')"
+check "the ready still ran"            1 "$(gh_ran ready)"
+report pass met met
+STUB_GH_REFUSE=ready run_ship --close
+check "a refused ready — exits non-zero" 1 "$RC"
+check "and says the command that finishes it" 1 "$(shipped | grep -c "gh pr ready $EXISTING")"
+check "never falling back to an edit"  0 "$(gh_ran edit)"
+: > "$STUB_PR_URL"
 
 echo
 echo " a fail is still the truth, and still closes:"
