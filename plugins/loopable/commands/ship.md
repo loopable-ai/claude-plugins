@@ -20,11 +20,46 @@ said and stop. It refuses a worktree with no session (`/loopable:start` first), 
 uncommitted tree, and a branch that is not pushed — each with the command to run.
 Run that command, then `/loopable:ship` again. **Never** commit or push on your
 own initiative to get past it; the person decides when work leaves the machine.
+Under the driver that decision is made: starting it delegated the push to the
+builder, so a refusal goes back to the builder.
+
+A script that **breaks** instead — fails at its own job, naming nothing about the
+branch — is not a refusal. Do the steps it did not, in its order and with its
+refusals, and never redo one it finished: for `--prepare`, the same three checks,
+`open_session` when the one on record has closed, and the last run's reports
+cleared from `.git/loopable/`. For `--close`, every step it takes, because a
+closed session never takes anything afterwards, the pull request's link
+included:
+
+1. the report's criteria mapped onto the brief's by their words, refusing the
+   close when one is missing;
+2. `verify.md`, `review.md` and every cited screenshot uploaded as session
+   attachments (request, presigned POST, confirm), the screenshots' ids kept for
+   `screenshot_ids`;
+3. what the pull request gets, as the script writes it (its file when it got
+   that far): the not-verified banner unless the verdict is `pass`, the criteria
+   as a checklist, the verdict and reason, and the reviewer's last line — as a
+   comment naming the commit (`.git/loopable/pr-comment.md`) for a pull request
+   that exists, or as the body, with the ask and `Loopable: <ref>`
+   (`.git/loopable/pr-body.md`), for a new one;
+4. the pull request — only an OPEN one for this branch counts
+   (`gh pr list --head <branch> --state open`): on the builder's draft,
+   `gh pr comment` with that comment and then `gh pr ready`, never an edit of
+   its title or body; with none, `gh pr create` with that body. A merged or
+   closed one is never this close's link;
+5. `close_session` with the whole contract — brief revision, HEAD sha, the
+   verdict and reason exactly as `verify.json` has them, every criterion with
+   `implemented_at` and its status, `screenshot_ids`, the cost, and `pr_url`.
+
+Then file the bug with `add_item` first, so its ref is real, and say what you
+did as a `post_activity` on the session, naming that ref — the driver posts it as
+`stood_in`. A step you could not do goes in that activity too.
 
 A session closes once, so a run after a `fail` or `not_run` close needs a new
 one. `--prepare` handles it: when the session on record is closed, it opens the
 next on the same item, harness, repo and branch, records it, and says so in one
-line. Never open one by hand.
+line. Never open one by hand — unless `--prepare` broke before it did, which is
+the stand-in above.
 
 If it succeeds it has printed the item, the acceptance criteria with their verify
 methods, the environments, the HEAD sha and where the two reports go. That
@@ -38,7 +73,9 @@ neither job yourself:
   step 1, and the instruction that every status must come from a run at that sha.
   It writes `.git/loopable/verify.json` and `.git/loopable/verify.md`.
 - the **reviewer** (`loopable:reviewer`) — give it the criteria, the HEAD sha and
-  the default branch. It writes `.git/loopable/review.md`.
+  the default branch, and in a fix round the sha the last review was made at and
+  that review's path, so it reads what the round changed first. It writes
+  `.git/loopable/review.md`.
 
 Do not summarise the implementation for either of them, do not tell them what
 works, and do not edit what they return. A report you corrected is your report.
@@ -70,3 +107,8 @@ error to work around: fix what the report names, commit, push, and run
 `/loopable:ship` again. The merge guard refuses the merge while the close at the
 commit being merged says `fail`, or when the branch moved after the close; a
 `not_run` goes through only with a warning on the record.
+
+The next `--prepare` clears this run's reports. When the rounds matter — the
+driver keeps every one — copy `verify.json`, `verify.md` and `review.md` into
+`.git/loopable/rounds/<n>/` first, with the HEAD sha in `rounds/<n>/head`: the
+next review starts from that sha, and a master builder reads every round.

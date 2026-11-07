@@ -6,8 +6,9 @@ A repository names its project in `.loopable.yaml` at the root (see the skill
 for the three keys). From then on six hooks apply, each doing one mechanical
 thing — anything needing judgement is a skill, not a hook — plus two commands,
 which are the two ends of a piece of work (`/loopable:start` begins one,
-`/loopable:ship` finishes it), and four agents: the `verifier` and `reviewer`
-that ship runs, and the `driver` and `builder` that run the commands for you.
+`/loopable:ship` finishes it), and five agents: the `verifier` and `reviewer`
+that ship runs, and the `driver`, `builder` and `masterbuilder` that run the
+commands for you.
 
 | hook | event | |
 |---|---|---|
@@ -366,7 +367,9 @@ A worktree or branch that was there before the run is never touched, and
 neither is one that appeared meanwhile but is not this run's — on its branch, at
 its fallback path, or named by a word of its command — since another start may
 be making its own in the same window. A branch
-left standing was what made every retry refuse (344, 347, 352).
+left standing was what made every retry refuse (344, 347, 352). The plugin's
+only other removal is the driver's cleanup, of worktrees whose pull request has
+ended (below).
 
 **It cannot `cd` your session.** A running process cannot move the session that
 started it, so the last line does not pretend to — it says where the work is and
@@ -476,25 +479,72 @@ sometimes not:
 claude --agent loopable:driver
 ```
 
-A session started as the driver is a lead, not a builder. It reads the
-repository's `AGENTS.md` and the backlog, says the goal, the last decision
-and the next action, and then does two jobs: **files** what the person
-describes (`add_item`, `write_brief` with a verify method on every criterion)
-and **runs** ready items, up to four at once, to merged pull requests. Adapted
-from the driver in Avanti Studio's fountain plugin, with the backlog in place of
-GitHub issues and this plugin's scripts in place of its own:
+A session started as the driver is a lead, not a builder, and it works on the
+person's behalf. Its mission is **no human step the project did not ask for**.
+It cleans up, reads the repository's `AGENTS.md` and the backlog, says the goal,
+the last decision and the next action, and then **files** what the person
+describes (`add_item`, `write_brief` with a verify method on every criterion),
+**runs** ready items, up to four at once, to merged pull requests, and **does
+what the person asks** in the session — a tracked-file change through a builder,
+anything else itself. Adapted from the driver in Avanti Studio's fountain
+plugin, with the backlog in place of GitHub issues and this plugin's scripts in
+place of its own:
 
 ```
 start.sh  →  builder  →  ship.sh --prepare  →  verifier + reviewer  →  ship.sh --close  →  merge
 ```
 
+**It hands a person three things and nothing else**: what `AGENTS.md` names as
+a person's (a sign-off, the `ready` gate); what is hard to undo (deleting data,
+tearing down a stack, a secret, a public API, weakening its own gates without a
+person's decision); and a risk a person must own (one the reviewer names, a head
+nothing could verify). A question only the person can answer is asked once, in a
+line, while the rest goes on. Safe operational writes are its own — re-sending an
+invite (cancel and create again through the app's own invite route,
+`/v1/studios/{studioId}/invites` — the same API, no cloud write), a read-only
+probe, a release tag `AGENTS.md` names — and destructive or production-data
+writes stay the person's to run.
+
 **It drives the same machinery a person does, and adds none.** `start.sh` still
 refuses an item that is not `ready`, the close contract is still written by
 `ship.sh` from two reports the builder never touched, and the merge guard still
-refuses a merge without a `pass` at the head going in. The driver's judgement
-sits on top: merge, send findings back to the same builder (three rounds), or
-hand to the person when `AGENTS.md` says a person signs it off or the change is
-hard to undo.
+refuses a failed or a moved head and records every other merge it lets through
+as `guard_allowed` — which the driver reads and never takes for a pass: it
+merges only on a `pass` at the head going in. When `start.sh` or
+`ship.sh` **breaks** — fails at its own job rather than refusing the item — the
+driver stands in: it does the steps the script did not, in its order and with its
+refusals — for `--close`, every one: the attachments, the comment and
+`gh pr ready` on the builder's draft (or a new pull request's body), an OPEN
+pull request only, and the whole contract with `pr_url`, since a closed
+session takes nothing afterwards — files the bug, and records what it did as a
+`stood_in` naming that bug. The merge guard is a gate, not machinery: nobody stands in for it.
+
+**Rounds have no fixed cap; the driver judges convergence.** Findings go back to
+the same builder while each round narrows what is wrong. When the fixes stop
+holding — a round regresses, a finding comes back, or a third round is due — the
+item goes to `masterbuilder-<ref>`, an opus agent with every builder limit that
+takes over the worktree, branch and pull request, reads every round together,
+writes a diagnosis of at most ten lines, and may replace the approach inside the
+brief. When the findings keep widening instead, after two rounds a finding
+outside the pull request's lines that breaks no criterion becomes a follow-up
+item (`add_item`) rather than another round; one that says a criterion is
+broken, the verifier's or the reviewer's, always starts a round. Every round is written down where the next hand reads it:
+the brief file `<wt gitdir>/loopable/brief.md` (the pack, with each round's
+findings appended under `## Amendments`, which the builder re-reads before it
+pushes and before it reports), and each run's reports copied to
+`<wt gitdir>/loopable/rounds/<n>/` before the next `--prepare` clears them. The
+reviewer reads a fix round's diff first, and earlier code blocks only for a
+security or data-loss defect or a broken criterion.
+
+**It cleans up after itself.** At the start and end of every session it removes
+every worktree `git worktree list` shows — `.claude/worktrees/`,
+`.loopable/worktrees/` or elsewhere — whose pull request is merged or closed,
+whose tree is clean and whose head is the pull request's, then deletes their
+branches in one `git branch -D`. Never `--force`: a tree git refuses has
+something in it, and the person is told. Nor does an ignored file other than
+dependencies and build output go silently: `git worktree remove` deletes a
+`.env` without a word, so `git status --ignored` is read first and the person
+is told.
 
 **The ready gate binds it.** An agent token cannot set `ready`, so the driver
 files work and then says which items need marking ready. That is the point
@@ -504,7 +554,8 @@ A person may mint their token on `/tokens` with the grant to set `ready`,
 asks for it in the session and names the items, never on its own.
 
 **It never edits.** The lead that writes code stops judging it, so every change
-is a `builder`'s, one per item, in that item's worktree. That is how the driver
+is a `builder`'s, one per item, in that item's worktree — or, once escalated,
+the `masterbuilder`'s, whose tool list `test.sh` holds to the builder's exactly. That is how the driver
 works, not a tool taken away: it keeps Edit and Write, because a
 `disallowedTools` list on the driver reaches the agents it spawns, and a
 builder without an editor cannot build — `test.sh` goes red if the list comes
@@ -521,7 +572,8 @@ is the person delegating that, and nothing reaches `main` past the verifier,
 the reviewer and the guard.
 
 **Its judgements are events in the session.** A builder started, a brief
-defect, each fix round and the finding behind it, a merge and a hand-off are
+defect, each fix round and the finding behind it, an escalation, a follow-up, a
+stand-in, a merge and what ran after it, a worktree removed and a hand-off are
 each a `post_activity` with the event in the `ref` — a fixed list of names and
 fields in `skills/loopable/driver-events.md`, which `test.sh` holds the driver
 to. A decision about a verdict comes after `ship.sh --close`, so it goes on the
@@ -546,4 +598,5 @@ merged and never reported — and no more than that.
 `curl` are stubbed, the config file is a fixture, and the write guard runs
 against a throwaway git repository it creates — no network, no token, no state
 from this checkout. Half the cases assert a PASS, which is the half worth
-having.
+having. Its last line is the count of cases it ran — read the count, not the
+colour.

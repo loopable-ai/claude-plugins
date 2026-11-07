@@ -22,8 +22,13 @@ row nothing will ever read.
   opened. A closed session takes activities from the member who held it and
   nobody else, and the post changes nothing about its ending. The re-ship
   session opened after a fix round is for the next run's own events.
+- **A stand-in** goes on the session the item has — the one the stand-in
+  opened, when the script broke before it opened one.
+- **A worktree removed** goes on the session recorded in that worktree's state
+  directory, read before the removal: removing the worktree removes the file.
 - **No session, no event.** `start.sh` refusing creates nothing, so there is
-  nothing to post on; see `start_refused`.
+  nothing to post on; see `start_refused`. A worktree with no session file is
+  named in the driver's message instead.
 
 Every `ref` carries `event`. The fields below are required; nothing else is.
 
@@ -52,18 +57,46 @@ session. Not a fix round.
 
 ### `fix_round`
 
-The driver sent findings back to the builder. One event per round, posted when
-it sends them. Kind `action`, on the session whose verdict, review or checks
-produced the findings.
+The driver sent findings back to the item's implementer — the builder, or the
+master builder once escalated. One event per round, posted when it sends them.
+Kind `action`, on the session whose verdict, review or checks produced the
+findings.
 
 | field | |
 |---|---|
 | `event` | `"fix_round"` |
-| `n` | the round, from 1; three at most |
+| `n` | the round, from 1, with no fixed cap; the master builder's rounds go on counting from the builder's |
 | `source` | `"verifier"`, `"reviewer"` or `"check"` — whose finding it was |
 | `finding` | the finding, verbatim; several findings from one source are one string, each on its own line |
 
 Findings from two sources in one round are two events with the same `n`.
+
+### `escalated`
+
+The driver took the item from `builder-<ref>` and gave it to
+`masterbuilder-<ref>`, because the fixes stopped holding. Once per item. Kind
+`action`, on the session whose verdict it acted on, beside that round's
+`fix_round`.
+
+| field | |
+|---|---|
+| `event` | `"escalated"` |
+| `n` | the round the master builder starts with |
+| `sign` | `"regressed"`, `"finding_returned"` or `"third_round"` — which sign it was |
+| `reason` | the one sentence of why, with the round numbers |
+
+### `follow_up`
+
+After two fix rounds, a finding outside the pull request's lines went to a new
+item instead of another round. Kind `action`, on the session whose verdict,
+review or checks raised it.
+
+| field | |
+|---|---|
+| `event` | `"follow_up"` |
+| `item` | the follow-up item's ref, as a number |
+| `source` | `"verifier"`, `"reviewer"` or `"check"` — whose finding it was |
+| `finding` | the finding, verbatim |
 
 ### `merged`
 
@@ -75,13 +108,29 @@ it merged on, posted once `gh pr view` says `MERGED`.
 | `event` | `"merged"` |
 | `pr` | the pull request number, as a number |
 | `sha` | the merge commit's sha |
-| `reason` | the one sentence of why |
+| `reason` | the one sentence of why, naming any finding that went to a follow-up |
+
+### `after_merge`
+
+What the driver ran after a merge because `AGENTS.md` names it — a release tag
+pushed and the run it started, a deploy verified by sha — and what it showed.
+One event per step. Kind `result`, on the session the `merged` went on.
+
+| field | |
+|---|---|
+| `event` | `"after_merge"` |
+| `step` | what ran: `"release_tag"` or `"deploy"` |
+| `sha` | the merge commit's sha |
+| `result` | `"green"` or `"red"` — a deploy whose sha does not match is red |
+| `evidence` | the tag, the run's url, or what the version check answered |
 
 ### `handed_off`
 
-The driver handed the item to a person: a `not_run` verdict, a sign-off
-`AGENTS.md` asks for, a change hard to undo, a risk only a person can accept,
-or three rounds spent. Kind `result`, on the session whose verdict it acted on.
+The driver handed the item to a person: a sign-off `AGENTS.md` asks for, a
+change hard to undo, a risk only a person can accept — a `not_run` that nothing
+in the session could run is one — or a master builder whose rounds stopped
+converging, with the question only the person can answer. Kind `result`, on the
+session whose verdict it acted on.
 
 | field | |
 |---|---|
@@ -101,3 +150,49 @@ here so that home takes them as they are.
 |---|---|
 | `event` | `"start_refused"` |
 | `blockers` | what `start.sh` printed as the blockers, verbatim |
+
+### `guard_allowed`
+
+**Posted by the merge guard, never by the driver.** The guard refuses only a
+failed head or a moved head; every other merge it lets through with a warning
+on stderr and this event, on the item's newest **closed** session — never an
+open one. With no closed session to post on it only prints, and a merge with no
+pull request it could resolve prints `no_pr_resolved` and records nothing. Kind
+`result`. It is listed here so the one list names every event a session's
+stream can carry. The driver reads it and never takes it for a pass: a merge
+the guard allowed is still the driver's to judge by its own rule.
+
+| field | |
+|---|---|
+| `event` | `"guard_allowed"` |
+| `pr` | the pull request number, as a number |
+| `reason` | the guard's code for why nothing was refused — `not_run`, `no_session`, `not_in_review`, `unresolved_ref`, `unreachable`, and the rest `guard-merge.sh` names |
+| `head` | the PR's head sha the guard checked |
+
+### `stood_in`
+
+`start.sh` or `ship.sh` broke — failed at its own job, not refused the item — and
+the driver did by hand the steps it had not done, in its order, refusing what it
+would have refused. Kind `action`, on the item's session.
+
+| field | |
+|---|---|
+| `event` | `"stood_in"` |
+| `script` | `"start.sh"`, `"ship.sh --prepare"` or `"ship.sh --close"` |
+| `failure` | what the script printed, verbatim |
+| `did` | the steps the driver took, one per line |
+| `bug` | the ref of the bug item filed for it, as a number — filed before this event, so the ref is real |
+
+### `worktree_removed`
+
+The driver removed a worktree whose pull request was merged or closed, whose
+tree was clean and whose head was the pull request's, and deleted its local
+branch. Posted at the session's start or end, when the cleanup runs. Kind
+`action`, on the session recorded in that worktree.
+
+| field | |
+|---|---|
+| `event` | `"worktree_removed"` |
+| `worktree` | the path it had |
+| `branch` | the branch deleted with it |
+| `pr` | the pull request number, as a number |

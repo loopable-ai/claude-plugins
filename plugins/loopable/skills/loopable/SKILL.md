@@ -88,9 +88,16 @@ pack. Use it instead of doing those five by hand: the order is the point, and
 the step that gets skipped by hand is the refusal.
 
 It refuses loudly rather than silently — a non-zero exit and a sentence — and a
-refusal means nothing was created and nothing was reported. When it refuses
-because the item is not ready, the blockers it prints are the answer: say them
-and stop, rather than starting anyway.
+refusal leaves nothing behind and reports nothing — what a failed start made, it
+takes back, and says so. When it refuses
+because the item is not ready, the blockers it prints are the answer: say them,
+rather than starting anyway, and the item starts once a person has cleared them.
+
+A script that **breaks** — fails at its own job, naming nothing about the item —
+is not a refusal. Do the steps it did not, in its order, with the readiness
+check still first, never redo one it finished, file the bug, and say what you
+did in the session with the bug's ref. `commands/start.md` and
+`commands/ship.md` list the steps.
 
 It cannot move your session into the worktree it made. Its last line says where
 the work is; open a new session there, or keep every edit under that path.
@@ -119,9 +126,20 @@ starts from `origin/main`, each PR names its item, and nothing two agents do
 lands in the same working tree. `LOOPABLE_ALLOW_MAIN=1` overrides the refusal
 once, for a person with a reason.
 
+A worktree whose pull request is merged or closed, whose tree is clean and whose
+head is the pull request's has nothing left in it — wherever `git worktree list`
+puts it, `.claude/worktrees/` or `.loopable/worktrees/`. The driver removes those
+at the start and end of its sessions and deletes their branches in one
+`git branch -D`; never with `--force`. A tree git refuses, or one holding an
+ignored file other than dependencies and build output (`git status --ignored`:
+a `.env`, say, which a removal deletes without a word), is named to the person
+and left.
+
 ## Your session is already being reported
 
-You do not open a session, and you do not narrate your tool calls. The plugin's
+You do not open a session — unless you are standing in for a `start.sh` or
+`ship.sh --prepare` that broke before it did — and you do not narrate your tool
+calls. The plugin's
 hooks do it: one is opened (or resumed) for this branch's item when the session
 starts, a batched `action` activity carries what you ran, a created PR is posted
 the moment `gh pr create` prints its url, and a `result` summary goes in when
@@ -132,16 +150,20 @@ So `post_activity` is for the things a hook cannot know: a decision you made and
 why, something that turned out to be harder than the item said, a question you
 are about to ask. Write those for a person watching the console, plainly.
 
-The driver's judgements — a builder started, a fix round, a merge, a hand-off —
-are a fixed list of events with structured fields in the activity's `ref`, so
-they can be counted and not only read: `driver-events.md`, beside this file, is
-that list and says which session each goes on.
+The driver's judgements — a builder started, a fix round, an escalation to the
+master builder, a follow-up filed, a stand-in for a script that broke, a merge
+and what ran after it, a worktree removed, a hand-off — are a fixed list of
+events with structured fields in the activity's `ref`, so they can be counted and
+not only read: `driver-events.md`, beside this file, is that list and says which
+session each goes on.
 
 What the hooks will **not** do is close the session. A `complete` close is a
 claim — brief revision, HEAD sha, verifier verdict, every criterion accounted
 for, screenshots, cost — and a hook watching a process end knows none of it. A
 session left open says the work is not finished, which is true. `/loopable:ship`
-closes it with the contract, and it is the only thing that does.
+closes it with the contract, and it is the only thing that does — except a
+stand-in for a `--close` that broke, which takes every step the script takes
+(`commands/ship.md`) and nothing less.
 
 If nothing is reported, the branch's item did not resolve — `main`, no
 `.loopable.yaml`, or two items with equal claim on the branch name. Set

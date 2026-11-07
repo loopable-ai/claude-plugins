@@ -259,6 +259,12 @@ verdict() { # verdict <command> -> deny|pass; its stderr lands in $GUARD_ERR
     "$HERE/guard-merge.sh" 2> "$GUARD_ERR" |
     jq -r '.hookSpecificOutput.permissionDecision // "pass"' 2>/dev/null || echo pass
 }
+# EVERY CASE IS COUNTED, and the count is the suite's last line: a count, not a
+# colour, is how a reader knows the cases ran (AGENTS.md). One line per case in
+# a file, not a variable, because some cases run in a `( ... )` subshell and a
+# variable set there is gone when it ends — a FAIL in one would print and
+# still end the suite green.
+TALLY="$STUB/tally"; : > "$TALLY"
 # What the last run recorded: one `<session> <event> <pr> <reason> <head>` line
 # per activity it posted, or `none`.
 recorded() {
@@ -309,8 +315,8 @@ sessions_are() { # sessions_are <jq array of sessions>
 }
 check() { # check <label> <want> <got>
   local got=${3:-pass}; [ -z "$got" ] && got=pass
-  if [ "$got" = "$2" ]; then printf '  ok   %s\n' "$1"
-  else printf '  FAIL %-52s got=%s want=%s\n' "$1" "$got" "$2"; FAILED=1; fi
+  if [ "$got" = "$2" ]; then printf '  ok   %s\n' "$1"; echo ok >> "$TALLY"
+  else printf '  FAIL %-52s got=%s want=%s\n' "$1" "$got" "$2"; FAILED=1; echo FAIL >> "$TALLY"; fi
 }
 g() { check "$1" "$2" "$(verdict "gh pr merge 9 --squash")"; }
 # The same PR, spelled the ways a person actually spells it. The first version
@@ -2422,7 +2428,7 @@ AGENTS="$HERE/../agents"
 # The frontmatter alone: the lines between the first two `---`.
 fm() { awk 'NR == 1 && $0 == "---" {f = 1; next} f && $0 == "---" {exit} f' "$1"; }
 tools_of() { fm "$1" | sed -n 's/^tools: //p' | tr ',' '\n' | tr -d ' '; }
-for a in driver builder verifier reviewer; do
+for a in driver builder masterbuilder verifier reviewer; do
   check "agents/$a.md is named $a"  "$a" "$(fm "$AGENTS/$a.md" 2>/dev/null | sed -n 's/^name: //p')"
   check "and says when to use it"   1    "$(fm "$AGENTS/$a.md" 2>/dev/null | grep -c '^description: ')"
 done
@@ -2448,6 +2454,37 @@ T=$(tools_of "$AGENTS/builder.md")
 check "the builder lists its tools"  yes "$([ -n "$T" ] && echo yes || echo no)"
 check "with no backlog and no agents" none \
   "$(printf '%s\n' "$T" | grep -E '^(mcp__|Agent$|Task$|SendMessage$)' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+# THE MASTER BUILDER KEEPS EVERY BUILDER LIMIT (361). It is the hand the driver
+# escalates to when fix rounds stop converging: a stronger model, the same
+# tools. Its list is the builder's, exactly, so a backlog tool or an Agent on
+# either one alone turns this red, and it runs on opus.
+M=$(tools_of "$AGENTS/masterbuilder.md")
+check "the master builder lists its tools" yes "$([ -n "$M" ] && echo yes || echo no)"
+check "and they are the builder's, exactly" same \
+  "$([ -n "$M" ] && [ "$(printf '%s\n' "$M" | sort)" = "$(printf '%s\n' "$T" | sort)" ] && echo same || echo "$M" | tr '\n' ' ')"
+check "and it runs on opus" opus "$(fm "$AGENTS/masterbuilder.md" 2>/dev/null | sed -n 's/^model: //p')"
+# THE BRIEF FILE IS ONE PATH IN THREE PROMPTS (361). The driver writes the pack
+# and every round's amendment to <state>/brief.md; the builder and the master
+# builder re-read it before they push and before they report, because a message
+# reaches a working agent late. One of the three naming another file is a round
+# nobody reads.
+check "the driver and both builders name the one brief file" none \
+  "$(for a in driver builder masterbuilder; do
+       grep -q 'loopable/brief\.md' "$AGENTS/$a.md" 2>/dev/null || printf '%s ' "$a"; done | sed 's/ $//' | grep . || echo none)"
+# A STAND-IN FOR --close TAKES EVERY STEP THE SCRIPT TAKES (361, round 1). A
+# closed session never takes anything afterwards, so a stand-in that leaves out
+# the screenshot ids or the pull request's url leaves them out for good — and
+# one that takes a merged pull request for its link (370) records the wrong one.
+# Both places that teach it name all three.
+check "a --close stand-in names screenshot_ids, pr_url and an open PR only" none \
+  "$(for f in "$AGENTS/driver.md" "$HERE/../commands/ship.md"; do
+       for w in screenshot_ids pr_url '--state open'; do
+         grep -qF -- "$w" "$f" 2>/dev/null || printf '%s:%s ' "$(basename "$f")" "$w"; done
+     done | sed 's/ $//' | grep . || echo none)"
+# AND THE CLEANUP READS THE IGNORED FILES, which `git worktree remove` deletes
+# without a word and `status --porcelain` does not show: a `.env` is data.
+check "the cleanup reads the ignored files first" 1 \
+  "$(grep -c -- '--ignored' "$AGENTS/driver.md" | sed 's/^[1-9][0-9]*$/1/')"
 # THE DRIVER IS PROSE ABOUT SCRIPTS AND AGENTS, and prose does not fail when a
 # script is renamed. Every bin/, commands/ and loopable: name it uses must exist.
 MISSING=$(
@@ -2462,12 +2499,14 @@ MISSING=${MISSING% }
 check "every script and agent the driver names exists" none "${MISSING:-none}"
 # THE DRIVER'S EVENTS ARE A FIXED LIST (337), read by name by whatever counts
 # them, so the list and the prose that posts them cannot drift: the list keeps
-# the six the brief named, the driver points at the list, and names every
-# event on it. An event dropped from the prompt is one nobody posts.
+# the six the brief named and the five 361 added, the driver points at the
+# list, and names every event on it. An event dropped from the prompt is one
+# nobody posts.
 EVENTS="$HERE/../skills/loopable/driver-events.md"
 LISTED=$(sed -n 's/^### `\([a-z_]*\)`$/\1/p' "$EVENTS" 2>/dev/null)
 check "the driver's events are listed in one place" none \
-  "$(for e in builder_started fix_round merged handed_off brief_defect start_refused; do
+  "$(for e in builder_started fix_round merged handed_off brief_defect start_refused \
+              worktree_removed stood_in escalated follow_up after_merge guard_allowed; do
        printf '%s\n' "$LISTED" | grep -qx "$e" || printf '%s ' "$e"; done | sed 's/ $//' | grep . || echo none)"
 check "the driver points at that list" 1 "$(grep -c 'driver-events\.md' "$AGENTS/driver.md" | sed 's/^[1-9][0-9]*$/1/')"
 check "and names every event on it" none \
@@ -2532,4 +2571,7 @@ for s in plugin mcp; do
 done
 
 echo
-if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; exit 1; fi
+CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
+FAILS=$(grep -c '^FAIL$' "$TALLY")
+if [ "$FAILED" = 0 ] && [ "$FAILS" = 0 ]; then echo "ALL PASS — $CHECKS checks"
+else echo "FAILURES ABOVE — $FAILS of $CHECKS checks failed"; exit 1; fi
