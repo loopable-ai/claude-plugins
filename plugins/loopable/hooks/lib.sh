@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Shared by every Loopable hook: how to reach the backlog, and when not to try.
 #
-# EVERY FAILURE HERE IS A PASS — with ONE stated exception, guard-merge.sh,
-# which refuses what it cannot verify because a merge cannot be taken back.
-# The helpers below therefore report failure honestly (a non-zero return, not
-# an empty answer that reads like "no") and each CALLER decides what silence
-# means for it. See "cannot verify" in guard-merge.sh.
+# EVERY FAILURE HERE IS A PASS, with no exception. guard-merge.sh was one —
+# it refused what it could not verify — until 363 made it refuse only a failed
+# or a moved head and let the rest through out loud. The helpers below report
+# failure honestly (a non-zero return, not an empty answer that reads like
+# "no"), and each CALLER decides what silence means for it: the merge guard
+# says it on stderr, the reporting hooks say nothing.
 #
 # A hook that blocks real work because Aurora was
 # asleep, or because somebody has no token, is worse than no hook at all — the
@@ -165,7 +166,7 @@ loopable_items() {
   local p
   for p in $projects; do
     loopable_get "/agent/projects/$p/items" |
-      jq -r '.items[] | [.id, .status, .title, .ref] | @tsv' || return 1
+      jq -r '.items[] | [.id, .status, .title, .ref] | @tsv' 2>/dev/null || return 1
   done
 }
 
@@ -238,25 +239,28 @@ loopable_resolve_ref() { # loopable_resolve_ref <ref> [items tsv] -> an id
 
 # ------------------------------------------- what a session claimed, and at --
 #
-# The close contract (S1.3) as three fields per closed session: the state, the
-# sha it was built at, and what the verifier made of it. `state=complete` is
-# asked of the API rather than filtered here, so a session that ended in
-# `error` — which claims nothing and proves nothing — never reaches a caller.
-loopable_sessions() { # loopable_sessions <project> <item> -> state\tsha\tverdict\treason
-  local out
-  out=$(loopable_get "/agent/projects/$1/sessions?item_id=$2&state=complete") || return 1
+# Every session on an item — or, with no item, in the whole project — in the
+# API's order: open ones first, then the most recent. Beside each, the close
+# contract (S1.3) — the state, the sha it was built at, what the verifier made
+# of it — and what ties it to a pull request: its item, its branch, the number
+# its close recorded.
+#
+# EVERY STATE, AND THE CALLER FILTERS. The merge guard needs several answers
+# from one instant: the complete closes, which are the evidence (an `error`
+# close claims nothing and proves nothing, so it is `$2 == "complete"` there);
+# the newest CLOSED session, which is where a merge it let through is recorded
+# (363); and, for a PR whose body names no item, which item's sessions are
+# this PR's. Separate reads would be separate instants.
+#
+# A GARBLED ANSWER IS A FAILURE, AND A SILENT ONE: jq's own diagnostic is not
+# a sentence anybody running a merge should read.
+loopable_sessions() { # loopable_sessions <project> [item] -> id\tstate\tsha\tverdict\titem\tbranch\tpr\treason
+  local out q=""
+  [ -n "${2:-}" ] && q="?item_id=$2"
+  out=$(loopable_get "/agent/projects/$1/sessions$q") || return 1
   printf '%s' "$out" |
-    jq -r '.sessions[]? | [.state, (.head_sha // ""), (.verdict // ""), (.verdict_reason // "")] | @tsv'
-}
-
-# The verify methods of an item's acceptance criteria, one per line. Only
-# `browser` matters to a caller today: it is the method S1.3 made screenshots
-# mandatory for, and therefore the one that says a verifier had something to
-# drive. An item with none of them is an item `not_run` can be honest about.
-loopable_verify_methods() { # loopable_verify_methods <project> <item>
-  local out
-  out=$(loopable_get "/agent/projects/$1/items/$2") || return 1
-  printf '%s' "$out" | jq -r '.brief.criteria[]?.verify // empty'
+    jq -r '.sessions[]? | [(.id // ""), (.state // ""), (.head_sha // ""), (.verdict // ""),
+      (.item_id // ""), (.branch // ""), ((.pr_number // "") | tostring), (.verdict_reason // "")] | @tsv' 2>/dev/null
 }
 
 # ONE PLACE THAT MAKES BACKLOG TEXT SAFE TO SHOW.
@@ -536,16 +540,24 @@ loopable_item() { # -> a work item id, or non-zero
 # on anything at all — no session, no token, no network, a 404 because the
 # session was closed by /loopable:ship while the hook was in flight.
 loopable_activity() { # loopable_activity <kind> <body> [ref json]
-  local p s ref payload
+  local p s
   p=$(loopable_project) || return 1
-  loopable_id_ok "$p" || return 1
   s=$(loopable_state session) || return 1
-  loopable_id_ok "$s" || return 1
-  ref=${3:-}
+  loopable_post_activity "$p" "$s" "$1" "$2" "${3:-}"
+}
+# ...or to a session NAMED BY ITS ID, which is the merge guard's case (363): it
+# records a merge it let through on the item's newest session, which is not the
+# session of the worktree the merge was typed in. Same discipline: both ids
+# through loopable_id_ok before either reaches a path, and false on anything.
+loopable_post_activity() { # loopable_post_activity <project> <session> <kind> <body> [ref json]
+  local ref payload
+  loopable_id_ok "$1" || return 1
+  loopable_id_ok "$2" || return 1
+  ref=${5:-}
   [ -n "$ref" ] || ref='{}'
-  payload=$(jq -nc --arg k "$1" --arg b "$2" --argjson r "$ref" \
+  payload=$(jq -nc --arg k "$3" --arg b "$4" --argjson r "$ref" \
     '{kind: $k, body: $b, ref: $r}') || return 1
-  loopable_post "/agent/projects/$p/sessions/$s/activities" "$payload" >/dev/null
+  loopable_post "/agent/projects/$1/sessions/$2/activities" "$payload" >/dev/null
 }
 
 # THE BUFFER IS CLAIMED BY RENAMING IT, then posted. Two tool calls finishing

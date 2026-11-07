@@ -16,7 +16,7 @@ that ship runs, and the `driver` and `builder` that run the commands for you.
 | `tool-use.sh` | PostToolUse | Reports a created PR at once, and batches everything else into one `action` activity. |
 | `stop.sh` | Stop | One `result` activity saying where this stretch got to. It does not close the session. |
 | `guard-main.sh` | PreToolUse Edit/Write | Refuses an edit **on `main`** to a tracked path, and prints how a branch is started here — `/loopable:start`, and the repository's own `start:` line. One worktree per item is what lets several agents share one repository. |
-| `guard-merge.sh` | PreToolUse Bash | Refuses `gh pr merge` for a PR that touches a tracked path and names no work item, or names one that is not `in_review` with a verified close at **this PR's HEAD sha**. |
+| `guard-merge.sh` | PreToolUse Bash | Refuses `gh pr merge` only for a **failed or moved head**: the item's close at this PR's HEAD sha says `fail`, or it has closes and none at that HEAD — whatever its status, and found through its sessions when the body names none. Every other merge of a tracked PR goes through with a warning and a `guard_allowed` activity on the item's newest closed session. |
 
 It exists because the story diverged once: four PRs shipped a whole phase and
 every one of its backlog items still read "Not Started" afterwards. The plan
@@ -112,7 +112,7 @@ repository root, needs a `.gitignore` entry, and a plugin editing somebody's
 work and is still a rule that can be removed; a file the git directory owns is
 not a rule at all.
 
-## Every failure is a pass — except one
+## Every failure is a pass
 
 No token, no network, a sleeping database, an id the token cannot see, no git,
 a detached HEAD — all pass. A guard speaks only on a confident negative: the
@@ -135,21 +135,30 @@ The write guard judges the repository **the file is in**, not the session's: a
 session in a main checkout editing a file inside a worktree is doing the right
 thing, and the worktree's branch is the one that counts.
 
-**The merge guard is the exception, and it is deliberate.** A `Write` refused
-in error costs somebody thirty seconds; a merge cannot be taken back. If this
-guard failed open whenever the backlog was unreachable, its entire ruleset
-would be switched off by a dropped connection — "the API was down" is the
-cheapest exploit anybody will ever find, and it leaves no trace that a check
-was skipped. So `gh pr merge` REFUSES WHAT IT CANNOT VERIFY: no token, no
-network, a sleeping database, a ref the token cannot resolve to an item. The
-refusal says the backlog is what did not answer, so nobody reads it as a
-statement about their work.
+**The merge guard was the exception, and since 363 it is not.** It used to
+refuse what it could not verify — no token, no network, a ref that resolves to
+nothing, no close, a `not_run` — on the argument that a merge cannot be taken
+back. Once the driver judges merges, those are judgements, not facts: hand it to
+a person, merge after a check by hand, wait for the backlog. A wall in front of
+a decision somebody has already weighed gets its door used every time, and the
+door records nothing. So the guard refuses only the two confident negatives —
+**a failed head** (the item's close at this PR's HEAD sha says `fail`) and **a
+moved head** (the item has complete closes and none at that HEAD), whatever the
+item's status — and lets the rest through **out loud**: a warning on stderr, and
+a `guard_allowed` activity on the item's newest **closed** session with the PR,
+the reason and the head in its `ref` (`no_marker`, `none`, `unresolved_ref`,
+`not_in_review`, `no_session`, `not_run`, `unknown_verdict`, `unreachable`,
+`no_project`, and `no_pr_resolved` for a merge whose PR it could not tell,
+which is printed only). Never an open session: an activity marks one active and resets
+its clock, which would un-mark a stall on the say-so of somebody else's merge.
+A merge with no item, no closed session or no backlog to post to is printed
+only, and the warning says which; a merge it refuses records nothing, because
+nothing was let through.
 
-Three things keep that from being intolerable. The stated exception is checked
-**before anything that can fail**, so `Loopable: none — <why>` still works with
-the API down. `gh` failing is still a pass, because a `gh pr view` that cannot
-answer means a `gh pr merge` that cannot merge — there is no state to protect,
-and refusing there would be theatre. And every refusal prints
+It is the one hook that speaks on a failure, because a merge is the moment
+somebody should know the check did not happen. `gh` failing is still a silent
+pass, because a `gh pr view` that cannot answer means a `gh pr merge` that
+cannot merge — there is no PR to warn about. And every refusal prints
 `LOOPABLE_ALLOW_MERGE=1`, which is a **person's** door: the hook reads its own
 environment, so the variable has to have been set in the session somebody
 started, and an agent cannot reach for it by prefixing the command it was just
@@ -170,21 +179,79 @@ used to wear (`s41`) still resolve here, because a PR body written before
 `none` is an escape hatch on purpose, and a visible one: a stated exception can
 be argued with in review, and silence cannot.
 
-Naming the item is the first half. The second is that the item is **`in_review`
-with a close at this PR's HEAD sha whose verdict is `pass`** — the close
-contract, not a status somebody typed. `/loopable:ship` (S2.5) will do it in
-one step; until it exists, it is one `close_session` through the MCP carrying
-the brief revision, the head sha, the verdict and its reason, every criterion
-with an `implemented_at` and a status, the screenshot attachment ids and the
-cost. A complete close moves the item to `in_review` by itself, so satisfying
-the contract satisfies the status too.
+Naming the item is the first half. The second is the close contract, not a
+status somebody typed: `/loopable:ship` closes a session carrying the brief
+revision, the head sha, the verdict and its reason, every criterion with an
+`implemented_at` and a status, the screenshot attachment ids and the cost, and
+a complete close moves the item to `in_review` by itself. The guard reads that
+close against the PR's HEAD: `fail` there, or closes none of which is there, is
+refused; `pass` there is a quiet merge; anything else is let through with a
+warning and a `guard_allowed` activity.
 
-`not_run` is not a synonym for `fail`. It is refused, naming the verdict —
-unless the item's acceptance criteria carry no `browser` verify method, in
-which case there was nothing for a browser verifier to drive and the verdict is
-a true statement. That rule is read off what S1.3 stored (`browser` is exactly
-the method the database makes screenshots mandatory for), not invented in the
-hook.
+**Leaving the line out does not leave the rules out, and naming another item
+does not either.** The guard always reads the project's sessions and takes
+every item whose close recorded this PR's number, or whose session ran on its
+head branch. When the body names no item — no line, `none`, or a ref nothing
+answers to — those are the PR's items. When it names one, they are checked
+beside it: the named item gets the full reading, a tied item the body does not
+name gets the two refusals and nothing else, and a refusal from any of them
+refuses the merge.
+
+`not_run` is not a synonym for `fail`, and the guard no longer judges it: it is
+the driver's, or the person's, to decide whether a head nobody verified is
+merged, and the guard records that it was.
+
+**The PR argument is read the way gh reads it.** For every `gh pr [-R <repo>]
+merge` — inside quotes too, because `eval`, `bash -c`, awk's `system()` and
+sed's `e` run what they quote — the guard skips options and their values the
+way gh's flag parser does: `--repo`, `--subject`, `--body`, `--body-file`,
+`--author-email` and `--match-head-commit` take the next word unless they carry
+`=`, and in a short cluster the first of `R t b F A` takes the rest of the word
+(`-Rowner/name`, `-dRo/r`, `-tSubject`) or the next word when it is the last
+letter (`-sR o/r`). A redirect and its target are not arguments, and a pipe, a
+`;`, an `&` or a `#` ends the command, so `gh pr merge 85 --merge
+--match-head-commit 54bbc22 --delete-branch 2>&1 | tail -5` asks about PR 85 and
+nothing else. The first word left is a number, `#<n>` or a pull request url; a
+branch name, which gh resolves; or nothing, which is the current branch's PR,
+asked of gh in the command's own directory. **When it still cannot tell** — a
+`$PR`, a quoted stretch it cannot see the end of — every number in the command
+is a candidate, as it was before 363: it over-collects rather than wave a merge
+through. A quoted merge with no PR read adds the current branch's PR too —
+`bash -c 'gh pr merge --squash'` merges it — **failing closed**: the only quoted
+merges that do not are those whose command never runs its arguments (`grep`,
+`egrep`, `fgrep`, `rg`, `ag`, `ack`, `echo`, `printf`, and `git commit`, `git
+tag`, `git log`), which are mentions, so a branch at a moved head does not make
+them a refusal. Any other command, known or not (`nohup`, `sudo -u`, `find
+-exec`, awk's `system()`, a script), counts as running it, and so does an
+`echo` or a `printf` in a command holding any shell metacharacter (`| & ; < >
+( ) $`, a backtick, a newline: `echo 'gh pr merge' | bash`, `> >(bash)`), an
+`rg` given `--pre` or `--pre-glob` (it runs a program on every file), or any
+mention inside a `$(…)` or backticks. The first-word pass (a leading `echo`,
+`cat`… cannot run anything) fails closed the same way: it is taken only for a
+command with no shell metacharacter at all, so `echo ok; gh pr merge 9` and
+`true && gh pr merge 9` are read (bug 372). What the reader still misses on a
+crafted command is filed as bug 373. The repository the command names (`-R`,
+`--repo`, wherever it sits) goes to every `gh pr` lookup the guard makes, when
+it reads as `OWNER/REPO` or `HOST/OWNER/REPO`; a pull request url names its own,
+which gh takes over `-R`, so that PR is looked up in the url's repository, and
+in `-R`'s as well when the two disagree.
+
+**It reads what the shell runs.** Whether a command mentions a merge at all is
+asked of its text with every quote and every backslash-newline taken out, the
+way the shell takes them out: `g"h" pr merge 9` and a `gh pr \` line break are
+the merge they run. That text is never parsed for numbers (dropping the quotes
+would make `--subject "fix 12"` read 12); its merges are matched to the raw
+reading's by where their `gh` stands, and one the raw reading did not find there
+is a merge a quote hid: every number in the command and the current branch's PR
+are checked. Matched by place, not counted, because a decoy only the raw text
+shows (`true _"gh pr merge 1"; g'h' pr merge 9`) would cancel a count out.
+
+**A merge whose PR nothing resolves** — no number, url or branch it could
+resolve, and no number in the command that is one — is let through (Joel,
+2026-11-07) as `no_pr_resolved`, and printed only: with no PR there is no item
+and so no closed session to record it on, and the worktree's own session is
+open. A quote straight after `merge`, the shape of `grep 'gh pr merge'`, is
+checked the same way but not reported.
 
 ## Four security rounds, and what they say
 
@@ -193,8 +260,11 @@ input, and four separate reviews each found something the last one's tests
 did not cover.
 
 - It read the PR number only where a regex expected it, so `gh pr merge
-  --squash 367` walked past. It now collects every integer in the command; a
-  number that is not a PR fails its own lookup and costs nothing.
+  --squash 367` walked past. It then collected every integer in the command,
+  which over-collected: a sha, a `2>&1` and a `| tail` after the number each
+  named a PR of their own, and a good merge was refused for somebody else's.
+  Since 363 it reads the PR argument itself, skipping options and their values
+  (see "Naming the item").
 - It decided "invoked or merely mentioned?" by looking for quotes — a regex
   pretending to be a shell parser, which `eval` and `bash -c` walk through. The
   default is inverted: a command mentioning a merge is checked unless it
@@ -396,9 +466,9 @@ sometimes not:
    disagree the item is the one that is wrong.
 6. **Exits 1 on a `fail` or `not_run` verdict — after closing.** The contract
    wants the truth, and a harness that only reported successes would be a
-   harness whose reports mean nothing. The pull request says so in a banner and
-   the merge guard refuses the merge until a session closes `pass` at the commit
-   being merged.
+   harness whose reports mean nothing. The pull request says so in a banner; the
+   merge guard refuses a `fail` at the commit being merged, and records a
+   `not_run` merge it lets through.
 
 ## The driver
 
@@ -444,7 +514,8 @@ item and `ship.sh` closes it, and a builder reporting on its own work is exactly
 the sentence the close contract replaced. That takes the obvious paths away,
 not every path: Bash could still run `gh pr merge` or `ship.sh`, so those rules
 are the builder's to keep, and the merge guard is what holds if it does not —
-no merge without a `pass` at the head going in. It commits and pushes
+no merge on a failed or moved head, and every other merge it lets through on
+the record as `guard_allowed`. It commits and pushes
 its branch, which `/loopable:ship` will not do for a person: starting the driver
 is the person delegating that, and nothing reaches `main` past the verifier,
 the reviewer and the guard.

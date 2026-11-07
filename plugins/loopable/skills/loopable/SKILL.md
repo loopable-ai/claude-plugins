@@ -189,35 +189,70 @@ Loopable: 41
 The ref (a plain number), or the item's uuid. The letter refs wore before
 2026-09-08 (`s41`) still resolve.
 
-**And the item has to be `in_review`, with a close at that PR's HEAD sha.**
-
-The merge guard refuses a PR that names nothing; that names an item the backlog
-does not call `in_review`; or whose newest complete session was closed at a
-different commit from the one about to be merged. A close says "I verified
+**The merge guard refuses only a failed or a moved head.** It refuses the merge
+when the item's newest complete close at the PR's HEAD sha carries the verdict
+`fail`, and when the item has complete closes but none of them is at that HEAD
+— the branch moved after it was verified. **Whatever the item's status**: an
+item moved off `in_review` after a failed close still has a failed head. And
+**whatever the body says**: the items tied to the PR through its sessions — a
+close that recorded its number, or a session on its head branch — are checked
+too, beside any item the body names, and a refusal from any of them refuses
+the merge. Leaving the line out, or naming a different item, is not a way past
+either rule. A close says "I verified
 this", and a branch that moved afterwards is a branch nobody verified — so
-**push after you close and the close is stale**: close again at the new HEAD.
+**push after you close and the close is stale**: ship again at the new HEAD.
 
-`/loopable:ship` is what satisfies both, and `close_session` through the MCP is
-the same payload by hand for a session the command cannot reach. Either way a
-complete close moves the item to `in_review` — that is the report, and
+**Everything else goes through, out loud and on the record**: a warning on
+stderr, and a `guard_allowed` activity on the item's newest **closed** session
+naming the PR, the reason and the head. The reasons are no `Loopable:` line,
+`Loopable: none`, a ref that resolves to nothing, an item that is not
+`in_review`, no complete close, a `not_run` verdict, and a backlog that did not
+answer. Those are judgements — the driver's, or the person merging — and the
+guard's part is that each one is recorded. It never posts to an open session,
+because that would mark it active and reset its clock. With no item, no closed
+session or no backlog to post to, the warning is the only record, and it says
+which.
+
+The guard reads the PR argument of `gh pr merge` the way gh does: options and
+their values are skipped (in a short cluster like `-dRo/r` or `-tSubject`, the
+first letter that takes a value takes the rest of the word), options between
+`pr` and `merge` count, and a redirect is not an argument — so a
+`--match-head-commit <sha>`, a `2>&1` or a `| tail` is not read as another pull
+request. No argument is the current branch's PR, asked of gh in the command's
+own directory, and a `-R`/`--repo` goes to every lookup. Quotes and
+backslash-newlines inside the words do not hide a merge: `g"h" pr merge` is the
+merge the shell runs. When it still cannot tell, every number in the command is
+checked, as before, and a quoted merge with no PR read adds the current
+branch's — unless its command never runs its arguments (`grep`, `rg`, `ack`,
+`ag`, `echo`, `printf`, `git commit`/`tag`/`log`), where it is a mention. Any
+other command counts as running it, so an unknown one fails closed, and an
+`echo` or `printf` in a command with any shell metacharacter (`echo '…' |
+bash`, `$(echo '…')`) is not a mention either. A leading `echo` or `cat` skips
+the guard only when the command holds no shell metacharacter at all, so `echo
+ok; gh pr merge 9` is read. (What the reader still misses on a crafted command
+is bug 373.) A pull request url's own repository is the
+one looked up (and `-R`'s too, when they disagree). A merge with no PR to
+resolve at all goes through as `no_pr_resolved`, printed only: there is no item,
+so there is no closed session to record it on.
+
+`/loopable:ship` is what puts a close on file, and `close_session` through the
+MCP is the same payload by hand for a session the command cannot reach. Either
+way a complete close moves the item to `in_review` — that is the report, and
 `report_progress` is not a substitute for it. `verifying` is the deploy and
 `done` is a person accepting the work; the API refuses both from a token.
 
-A verdict of `fail` is refused, and so is `not_run` — unless the item has no
-acceptance criterion a browser has to check, in which case there was nothing
-for a browser verifier to drive and the verdict is honest.
-
 If something genuinely has no item, say so on purpose — `Loopable: none —
-<why>` — because a stated exception can be argued with and silence cannot. It
-is the one thing the guard honours even when the backlog is unreachable: unlike
-every other hook here, this one **refuses what it cannot verify**, because a
-merge cannot be taken back and "the API was down" must not be a way through.
-`LOOPABLE_ALLOW_MERGE=1` is one, and it belongs to whoever started the session:
-the hook reads its own environment, so prefixing your command with it does
-nothing.
+<why>` — because a stated exception can be argued with and silence cannot.
+`LOOPABLE_ALLOW_MERGE=1` lets every merge through, and it belongs to whoever
+started the session: the hook reads its own environment, so prefixing your
+command with it does nothing.
 
 ## What the guards will not catch
 
-They cannot tell that you named the *wrong* item, and they cannot make you
-create an item for work that had none. They close the gaps that actually bite —
-edited on main, merged and never reported — and no more than that.
+They cannot tell that you named the *wrong* item when nothing ties the pull
+request to the right one — a failed or moved head on an item its sessions tie
+it to is refused whatever the body names, but an item with no session on this
+PR is invisible to them — and they cannot make you create an item for work that
+had none. They close the gaps that actually bite —
+edited on main, merged on a head that failed or moved — record the merges they
+let through, and no more than that.

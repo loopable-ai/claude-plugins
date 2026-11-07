@@ -43,7 +43,7 @@
 # A `fail` VERDICT STILL CLOSES. The contract wants the truth, and a harness
 # that only reported successes would be a harness whose reports mean nothing.
 # The pull request says so in its body or its comment, the script exits 1, and
-# the merge guard refuses the merge until a `pass` at the HEAD being merged.
+# the merge guard refuses a merge at that HEAD while its close says `fail`.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=/dev/null
@@ -502,10 +502,19 @@ if [ -n "$SCOPE" ]; then PR_TITLE="$TYPE($SCOPE): $TITLE_TEXT"; else PR_TITLE="$
 # THE VERIFICATION AND THE REVIEW, as a person reads them, in ONE copy: they
 # land in the body of a pull request this script opens, or in a comment on the
 # one the builder already opened (362), and two copies would drift.
+#
+# WHAT THE MERGE GUARD WILL DO WITH IT (363): it refuses a head whose close says
+# `fail`, and lets anything else through with a warning and a `guard_allowed`
+# record — so the banner says which of the two this pull request is.
+if [ "$VERDICT" = fail ]; then
+  GUARD_SAYS='The merge guard refuses a merge at this HEAD while its close says `fail`: fix it, push, and ship again.'
+else
+  GUARD_SAYS='The merge guard lets this through with a warning and a `guard_allowed` record on the item'"'"'s session: merging a head nobody verified is the call of whoever merges it.'
+fi
 not_verified() {
   if [ "$VERDICT" != pass ]; then
-    printf '> **Not verified.** The verifier says `%s` — %s\n>\n> The merge guard refuses this until a session closes `pass` at the HEAD being merged.\n\n' \
-      "$VERDICT" "$REASON"
+    printf '> **Not verified.** The verifier says `%s` — %s\n>\n> %s\n\n' \
+      "$VERDICT" "$REASON" "$GUARD_SAYS"
   fi
 }
 findings() {

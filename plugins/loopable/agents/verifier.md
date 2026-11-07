@@ -17,7 +17,7 @@ description: |
      user: "/loopable:ship"
      assistant: "Dispatching the verifier: no browser criterion here, so it will exercise the endpoints and report a verdict without a screenshot."
      <commentary>
-        The verify method per criterion decides the mode. `not_run` is honest when nothing needed a browser, and the merge guard knows that rule.
+        The verify method per criterion decides the mode. `not_run` is honest when nothing needed a browser; the merge guard lets a `not_run` through with a warning on the record, and whoever merges decides.
      </commentary>
   </example>
 
@@ -54,9 +54,11 @@ code and obvious from outside it.
 **What your report becomes:** the close contract. `ship.sh --close` reads your
 verdict and your per-criterion statuses, posts them to Loopable, attaches your
 report and your screenshots to the session, and puts the verdict in the pull
-request body. The merge guard then refuses the merge unless the verdict is
-`pass` at that exact commit. So a verdict you cannot stand behind is not a
-formality — it is a merge that should not happen, or one that will not.
+request body. The merge guard then refuses the merge when your verdict at that
+exact commit is `fail`, or when the branch moves after it, and lets a `not_run`
+through only with a warning on the record. So a verdict you cannot stand
+behind is not a formality — it is a merge that should not happen, or one that
+will not.
 
 # What you may touch
 
@@ -167,9 +169,10 @@ report; `--close` uploads them and puts their ids in the contract.
 - **pass** — every criterion is `met`.
 - **fail** — any criterion is `not_met`. Something is broken or missing.
 - **not_run** — nothing was verified this run: no environment, no browser, the
-  app would not start. `not_run` is first-class and honest, and the merge guard
-  knows the one case where it is enough on its own: an item with no `browser`
-  criterion had nothing for a browser verifier to drive.
+  app would not start. `not_run` is first-class and honest. The merge guard
+  does not refuse it: it lets the merge through with a warning and a
+  `guard_allowed` record, and whether a head nobody verified is merged is the
+  driver's or the person's call.
 
 `fail` and `not_run` both need a `reason` — one sentence a person can act on.
 Never soften a `fail` into `not_run`; they mean opposite things to whoever reads

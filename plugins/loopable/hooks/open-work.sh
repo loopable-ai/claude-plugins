@@ -52,6 +52,6 @@ follow.
 
 $SHOWN$MORE
 
-Read it with the loopable MCP (list_backlog), and report progress as part of finishing something rather than afterwards. A PR touching $(loopable_paths_phrase) must name its item in the body as 'Loopable: <id>' — the merge guard refuses otherwise." '{
+Read it with the loopable MCP (list_backlog), and report progress as part of finishing something rather than afterwards. A PR touching $(loopable_paths_phrase) must name its item in the body as 'Loopable: <id>'. The merge guard refuses only a head its close failed or a head that moved after the close; any other merge goes through with a warning, recorded on the item's session when it has one." '{
   hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: $c }
 }'

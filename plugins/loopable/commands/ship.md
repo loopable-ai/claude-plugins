@@ -67,5 +67,6 @@ puts at the end of a pull request body; it becomes the last line.
 If the verdict is `fail` or `not_run`, `--close` still closes — the contract wants
 the truth — the pull request says so, and the script exits 1. That is not an
 error to work around: fix what the report names, commit, push, and run
-`/loopable:ship` again. The merge guard refuses the merge until a session closes
-`pass` at the commit being merged.
+`/loopable:ship` again. The merge guard refuses the merge while the close at the
+commit being merged says `fail`, or when the branch moved after the close; a
+`not_run` goes through only with a warning on the record.
