@@ -258,13 +258,24 @@ In order, every time:
    `<kind>`, `<slug>`, `<shortid>`) — re-implementing it would create branches
    the repository's own convention does not recognise. Without one, the fallback
    is `git fetch origin && git worktree add -b <kind>/<slug>-<shortid>
-   .claude/worktrees/<branch> origin/main`.
+   .loopable/worktrees/<branch-slug> origin/main`, the branch with its `/` made
+   a `-`, under the main checkout even when started from a linked worktree. Either way `.loopable/` goes into the repository's
+   `info/exclude` once, so a worktree under the checkout is not an untracked
+   directory in it.
 
-   **The last word of the `start:` command, after substitution, is the branch.**
-   That is stated rather than inferred: it is how an existing branch is refused
+   **The branch is the `-b` (or `-B`) argument of the `start:` command, after
+   substitution; a command with neither names it as its last word.** That is
+   stated rather than inferred: it is how a branch already standing is found
    *before* anything is created, and the worktree itself is then found by asking
    git which checkout holds that branch — never by parsing what the command
-   printed.
+   printed. A start line should still put `-b` last, so every `start.sh` before
+   0.6.10, which read only the last word, finds it too.
+
+   **A branch already standing with a worktree on it is reused**, not refused:
+   the item is `ready`, so nobody has claimed it, and what the worktree lacks is
+   the claim and the session. A branch with no worktree on it is still refused,
+   and so is one whose worktree git still lists but whose directory is gone
+   (`git worktree prune` first).
 4. **Report `in_progress`**, with a note naming the branch. After the worktree,
    not before: an item claimed with no branch under it is a lie the console
    shows everyone.
@@ -276,9 +287,16 @@ In order, every time:
 **A command is not a hook, and the failure discipline is inverted.** A hook
 fails silently because nobody asked it to run; this was asked for by name, so
 every failure is a sentence and a non-zero exit, and each one says whether
-anything was created or reported. Nothing is ever undone: if the claim fails the
-worktree stands and the message says so, because removing a worktree is the one
-thing this plugin does not do anywhere.
+anything was created or reported. **What a failed run made, it takes back — and
+nothing else.** A failure after the worktree (the command failing, no worktree
+on the branch, the claim refused) removes the worktree and the branch *this run*
+made when nothing is lost by it — a clean tree, and no commit beyond
+`origin/main` — and says so; anything else stays and is named with the reason.
+A worktree or branch that was there before the run is never touched, and
+neither is one that appeared meanwhile but is not this run's — on its branch, at
+its fallback path, or named by a word of its command — since another start may
+be making its own in the same window. A branch
+left standing was what made every retry refuse (344, 347, 352).
 
 **It cannot `cd` your session.** A running process cannot move the session that
 started it, so the last line does not pretend to — it says where the work is and

@@ -90,6 +90,18 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "${STUB_CALLS:-}" ] && printf '%s\t%s\t%s\n' "$M" "$U" "$B" >> "$STUB_CALLS"
+# THE CLAIM CAN FAIL ON ITS OWN (359): the pack was read, the worktree made, and
+# then the report is refused. Recorded first, so a case can see it was tried.
+# ANOTHER START LANDING MEANWHILE: the driver runs several from one checkout,
+# and a claim can wait 20 s on a cold database. STUB_SIBLING is `<repo> <branch>
+# [<path>]`, made here, while this run's claim is in flight — a worktree, or with
+# no path only the branch, which another start's command may make first.
+if [ "$M" = PATCH ] && [ -n "${STUB_SIBLING:-}" ]; then
+  set -- $STUB_SIBLING
+  if [ $# -ge 3 ]; then git -C "$1" worktree add -q -b "$2" "$3" origin/main >/dev/null 2>&1
+  else git -C "$1" branch "$2" origin/main >/dev/null 2>&1; fi
+fi
+[ "$M" = PATCH ] && [ "${STUB_PATCH_FAIL:-}" = 1 ] && exit 22
 answer() { # answer <body> [code]
   printf '%s' "$1"
   [ -n "$WANT_CODE" ] && printf '\n%s' "${2:-200}"
@@ -1136,6 +1148,41 @@ git worktree add -q -b "$1" ".claude/worktrees/$1" origin/main
 echo "made $1"
 MKWT
 chmod +x "$STUB/mkwt.sh"
+# A start command that makes its worktree and THEN fails (359) — leaving the
+# tree clean, dirty, or with a commit of its own, which is what decides whether
+# start.sh may take back what this run made.
+cat > "$STUB/mkwt-fail.sh" <<'MKWT'
+#!/usr/bin/env bash
+# mkwt-fail.sh <clean|dirty|commit> <branch>
+set -eu
+git worktree add -q -b "$2" ".claude/worktrees/$2" origin/main
+case "$1" in
+  dirty)  echo wip > ".claude/worktrees/$2/wip.txt" ;;
+  commit) echo work > ".claude/worktrees/$2/work.txt"
+          git -C ".claude/worktrees/$2" add work.txt
+          git -C ".claude/worktrees/$2" -c user.name=t -c user.email=t@t \
+            -c commit.gpgsign=false commit -qm work ;;
+esac
+echo "half-way, and failing" >&2
+exit 3
+MKWT
+chmod +x "$STUB/mkwt-fail.sh"
+# A start command that makes its BRANCH and fails before any worktree: the
+# branch bare, or carrying a commit of its own (made with no checkout at all).
+cat > "$STUB/mkbr-fail.sh" <<'MKBR'
+#!/usr/bin/env bash
+# mkbr-fail.sh <clean|commit> <branch>
+set -eu
+if [ "$1" = commit ]; then
+  c=$(git -c user.name=t -c user.email=t@t commit-tree -p origin/main -m work 'origin/main^{tree}')
+  git branch "$2" "$c"
+else
+  git branch "$2" origin/main
+fi
+echo "branch made, no worktree, failing" >&2
+exit 3
+MKBR
+chmod +x "$STUB/mkbr-fail.sh"
 start_config() { # start_config [the start: line]
   { printf 'project: p-1\npaths:\n  - apps/loopable\n'
     [ $# -gt 0 ] && printf '%s\n' "$1"; } > "$SRT/.loopable.yaml"
@@ -1187,9 +1234,10 @@ RC=0
 # and the code comes back as the function's own: a `$(...)` around it would run
 # the script in a subshell and throw the code away, which is exactly how a
 # refusal that "said the right words" while exiting 0 would slip through.
-run_start() { # run_start <arg> -> RC; the output is in $STUB/out
+run_start() { # run_start <arg> -> RC; the output is in $STUB/out. RUN_IN: where from
   : > "$STUB_CALLS"
-  ( cd "$SRT" && CLAUDE_PROJECT_DIR="$SRT" "$HERE/../bin/start.sh" "$1" ) \
+  local in=${RUN_IN:-$SRT}
+  ( cd "$in" && CLAUDE_PROJECT_DIR="$in" "$HERE/../bin/start.sh" "$1" ) \
     > "$STUB/out" 2>&1
   RC=$?
   cat "$STUB/out"
@@ -1198,6 +1246,15 @@ sent() { # sent <method> <url regex> -> how many such requests were made
   awk -F'\t' -v m="$1" -v u="$2" '$1 == m && $2 ~ u' "$STUB_CALLS" | grep -c .
 }
 worktrees() { git -C "$SRT" worktree list | grep -c .; }
+wt_of() { # wt_of <branch> -> the checkout git says holds it, or nothing
+  git -C "$SRT" worktree list --porcelain |
+    awk -v b="refs/heads/$1" '/^worktree /{p=substr($0,10)} $0 == "branch " b {print p; exit}'
+}
+has_branch() { git -C "$SRT" show-ref --verify --quiet "refs/heads/$1" && echo 1 || echo 0; }
+# Where that checkout is, as a physical path, so a temporary directory under a
+# symlink (macOS's /var) compares equal to the place it was asked for.
+SRTP=$(cd "$SRT" && pwd -P)
+wt_at() { local p; p=$(wt_of "$1"); [ -n "$p" ] && (cd "$p" 2>/dev/null && pwd -P); }
 # THE REF, NOT THE UUID. The pack carries no ref yet, so it comes from the
 # backlog's own fourth field — and a branch ending in one is the only exact
 # answer the session hooks have to "which item is this branch".
@@ -1277,12 +1334,48 @@ check "the decisions that govern it"        1 "$(printf '%s\n' "$OUT" | grep -c 
 check "somewhere to point"                  1 "$(printf '%s\n' "$OUT" | grep -c 'loopable.ai')"
 check "and where the work now is"           1 "$(printf '%s\n' "$OUT" | grep -cF "Open a new session in $WT")"
 
-# STARTING IT TWICE IS THE COLLISION THE WHOLE RULE IS ABOUT, and it is caught
-# before anything is created or reported rather than after.
+# STARTING IT AGAIN FINISHES WHAT IS THERE (359). Two agents on one item is
+# caught by the readiness refusal — a claimed item is `in_progress`, not
+# `ready`. An item still `ready` with its branch and worktree standing is a start
+# that died half-way, or a worktree somebody cut by hand: what is missing is the
+# claim and the session, and refusing would be a wall where a helper belongs.
+rm -f "$NDIR/item" "$NDIR/session"
+BEFORE=$(worktrees)
 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
-check "starting it again — refused"    1 "$RC"
+check "starting it again, its worktree standing — exits 0" 0 "$RC"
+check "and says it reused that worktree" 1 "$(printf '%s\n' "$OUT" | grep -cF "Reusing the worktree at $WT")"
+check "making no second worktree"      "$BEFORE" "$(worktrees)"
+check "the item is reported in_progress" 1 \
+  "$(awk -F'\t' '$1 == "PATCH"' "$STUB_CALLS" | grep -c '"status":"in_progress"')"
+check "the session is opened"          1 "$(sent POST '/sessions$')"
+check "and written into that worktree" s-new "$(cat "$NDIR/session" 2>/dev/null)"
+check "which is the one it points at"  1 "$(printf '%s\n' "$OUT" | grep -cF "Open a new session in $WT")"
+
+# A BRANCH WITH NO WORKTREE ON IT is still refused: there is nothing to reuse,
+# and putting a checkout on a branch somebody left is that somebody's call.
+git -C "$SRT" branch -q feat/z-the-start-command-41 origin/main
+start_config "start: sh $STUB/mkwt.sh <type>/z-<slug>"
+BEFORE=$(worktrees)
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "its branch there, no worktree — refused" 1 "$RC"
 check "because the branch exists"      1 "$(printf '%s\n' "$OUT" | grep -c 'already exists')"
-check "and nothing is reported twice"  0 "$(sent PATCH '/items/')"
+check "creating nothing"               "$BEFORE" "$(worktrees)"
+check "and reporting nothing"          0 "$(sent PATCH '/items/')"
+check "and saying what to do next"     1 "$(printf '%s\n' "$OUT" | grep -c 'Put a worktree on it')"
+
+# A WORKTREE GIT STILL LISTS, ITS DIRECTORY GONE: deleted by hand, so git marks
+# it `prunable` and keeps naming the path. Reusing it would claim the item with
+# no checkout under it — and a claimed item is no longer `ready` to restart.
+git -C "$SRT" worktree add -q -b feat/gone-the-start-command-41 "$SRT/.claude/worktrees/gone" origin/main
+rm -rf "$SRT/.claude/worktrees/gone"
+start_config "start: sh $STUB/mkwt.sh <type>/gone-<slug>"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "its worktree's directory gone — refused" 1 "$RC"
+check "naming git worktree prune"      1 "$(printf '%s\n' "$OUT" | grep -c 'git worktree prune')"
+check "reporting nothing"              0 "$(sent PATCH '/items/')"
+check "and opening no session"         0 "$(sent POST '/sessions$')"
+git -C "$SRT" worktree prune
+start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
 
 echo
 echo " next, and the fallback:"
@@ -1310,10 +1403,178 @@ FALLBACK="story/the-start-command-41"
 check "with no start: command — exits 0" 0 "$RC"
 check "the branch is <kind>/<slug>-<shortid>" 1 \
   "$(git -C "$SRT" show-ref --verify --quiet "refs/heads/$FALLBACK" && echo 1 || echo 0)"
-check "under .claude/worktrees/"       1 \
-  "$([ -d "$SRT/.claude/worktrees/$FALLBACK" ] && echo 1 || echo 0)"
+# UNDER .loopable/, the plugin's own directory, and the branch as ONE name
+# (359): `story/x` as a path is a directory per type nobody asked for.
+check "under .loopable/worktrees/<branch-slug>" \
+  "$SRTP/.loopable/worktrees/story-the-start-command-41" "$(wt_at "$FALLBACK")"
 check "still cut from origin/main"     "$(git -C "$SRT" rev-parse origin/main)" \
   "$(git -C "$SRT" rev-parse "$FALLBACK")"
+# AND OUT OF SIGHT: a worktree under the checkout is an untracked directory in
+# it unless git is told, and the exclude file is the repository's own and local.
+EXCL="$(git -C "$SRT" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+check ".loopable/ is added to the exclude file" 1 "$(grep -cxF '.loopable/' "$EXCL")"
+check "so the main checkout does not list it"   0 "$(git -C "$SRT" status --porcelain | grep -c 'loopable/')"
+run_start "$READY" >/dev/null
+check "starting again adds it no second time"   1 "$(grep -cxF '.loopable/' "$EXCL")"
+# FROM INSIDE A LINKED WORKTREE, the default still lands under the MAIN checkout:
+# a worktree nested in another worktree goes when that one is removed.
+SIDE="$STUB/side-wt"
+git -C "$SRT" worktree add -q -b side/linked "$SIDE" origin/main
+printf 'project: p-1\npaths:\n  - apps/loopable\n' > "$SIDE/.loopable.yaml"
+RUN_IN="$SIDE" run_start next >/dev/null
+check "started from a linked worktree — exits 0" 0 "$RC"
+check "the worktree is under the main checkout's .loopable/" \
+  "$SRTP/.loopable/worktrees/bug-pick-me-${OPEN%%-*}" "$(wt_at "bug/pick-me-${OPEN%%-*}")"
+check "and nothing under the linked one"         0 "$([ -e "$SIDE/.loopable" ] && echo 1 || echo 0)"
+start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
+
+echo
+echo " the branch is the start line's -b (359):"
+# THIS REPOSITORY'S LINE AS IT STOOD ON 2026-10-27, whose last word is not the
+# branch but origin/main. Read as the last word, start.sh made the worktree,
+# looked for one on origin/main, found none and died with nothing reported — on
+# 344, 347 and 352 — leaving a branch that made every retry refuse.
+start_config "start: git worktree add .claude/worktrees/<slug> -b <type>/<slug> origin/main"
+EXACT="feat/the-start-command-41"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a start line ending in origin/main — exits 0" 0 "$RC"
+check "the branch is the -b argument"  1 "$(has_branch "$EXACT")"
+EWT=$(wt_of "$EXACT")
+check "its worktree is found"          "$SRTP/.claude/worktrees/the-start-command-41" "$(wt_at "$EXACT")"
+check "and named in what it printed"   1 "$(printf '%s\n' "$OUT" | grep -cF "worktree  $EWT")"
+check "reported in_progress on that branch" 1 \
+  "$(awk -F'\t' '$1 == "PATCH"' "$STUB_CALLS" | grep -F "$EXACT" | grep -c '"status":"in_progress"')"
+check "a session opened on it"         1 \
+  "$(awk -F'\t' '$1 == "POST" && $2 ~ /\/sessions$/' "$STUB_CALLS" | grep -cF "\"branch\":\"$EXACT\"")"
+check "and written into that worktree" s-new \
+  "$(cat "$(git -C "$EWT" rev-parse --absolute-git-dir 2>/dev/null)/loopable/session" 2>/dev/null)"
+
+# -B, git's other spelling of a new branch, is read the same way.
+start_config "start: git worktree add .loopable/worktrees/upper-<slug> -B <type>/upper-<slug> origin/main"
+run_start "$READY" >/dev/null
+check "a -B start line — exits 0"      0 "$RC"
+check "the branch is the -B argument"  "$SRTP/.loopable/worktrees/upper-the-start-command-41" \
+  "$(wt_at feat/upper-the-start-command-41)"
+check "and it is reported"             1 "$(sent PATCH '/items/')"
+
+# THIS REPOSITORY'S LINE TODAY, read out of its own .loopable.yaml: under
+# .loopable/worktrees/, and -b LAST, so that every start.sh before 0.6.10 — which
+# reads the last word — still finds the branch.
+OWN=$(LOOPABLE_REPO="$HERE/../.." loopable_config start)
+check "this repository's line ends in -b <type>/<slug>" "-b <type>/<slug>" \
+  "$(printf '%s' "$OWN" | awk '{print $(NF-1), $NF}')"
+check "and puts its worktree under .loopable/worktrees/" 1 \
+  "$(printf '%s' "$OWN" | grep -c ' \.loopable/worktrees/<slug> ')"
+start_config "start: $OWN"
+run_start next >/dev/null
+check "and it starts an item here — exits 0" 0 "$RC"
+check "on the branch its -b names"     "$SRTP/.loopable/worktrees/pick-me-${OPEN%%-*}" \
+  "$(wt_at "fix/pick-me-${OPEN%%-*}")"
+check "reported"                       1 "$(sent PATCH '/items/')"
+check "with a session"                 1 "$(sent POST '/sessions$')"
+
+echo
+echo " a start that fails takes back what it made, and only that (359):"
+# THE COMMAND FAILS AFTER MAKING ITS WORKTREE, leaving the tree clean and the
+# branch where origin/main is: nothing would be lost, and the branch left
+# standing is what made every retry refuse.
+start_config "start: sh $STUB/mkwt-fail.sh clean <type>/f1-<slug>"
+BEFORE=$(worktrees)
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the start command failing — exits non-zero" 1 "$RC"
+check "the worktree it made is removed" "$BEFORE" "$(worktrees)"
+check "and the branch"                 0 "$(has_branch feat/f1-the-start-command-41)"
+check "and it says so"                 1 "$(printf '%s\n' "$OUT" | grep -c '^Removed the worktree ')"
+check "having reported nothing"        0 "$(sent PATCH '/items/')"
+start_config "start: sh $STUB/mkwt.sh <type>/f1-<slug>"
+run_start "$READY" >/dev/null
+check "so starting again starts clean" 0 "$RC"
+
+# DIRTY: a file nobody committed is work, and it stays — named, with the reason.
+start_config "start: sh $STUB/mkwt-fail.sh dirty <type>/f2-<slug>"
+BEFORE=$(worktrees)
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "failing with a dirty tree — exits non-zero" 1 "$RC"
+check "the worktree is kept"           "$((BEFORE + 1))" "$(worktrees)"
+check "and the branch"                 1 "$(has_branch feat/f2-the-start-command-41)"
+check "and it says why"                1 "$(printf '%s\n' "$OUT" | grep -c '^Kept the worktree .*not committed')"
+check "removing nothing"               0 "$(printf '%s\n' "$OUT" | grep -c '^Removed')"
+
+# A COMMIT OF ITS OWN: the tree is clean, the branch is ahead, and it stays.
+start_config "start: sh $STUB/mkwt-fail.sh commit <type>/f3-<slug>"
+BEFORE=$(worktrees)
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "failing with a commit made — exits non-zero" 1 "$RC"
+check "the worktree is kept"           "$((BEFORE + 1))" "$(worktrees)"
+check "and the branch"                 1 "$(has_branch feat/f3-the-start-command-41)"
+check "and it says why"                1 "$(printf '%s\n' "$OUT" | grep -c '^Kept the worktree .*1 commit beyond origin/main')"
+
+# THE CLAIM REFUSED, after a worktree this run made: removed, so the backlog
+# saying `ready` is true of the repository too.
+start_config "start: git worktree add .loopable/worktrees/f4-<slug> -b <type>/f4-<slug> origin/main"
+BEFORE=$(worktrees)
+STUB_PATCH_FAIL=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the claim failing — exits non-zero" 1 "$RC"
+check "the claim was tried"            1 "$(sent PATCH '/items/')"
+check "the worktree it made is removed" "$BEFORE" "$(worktrees)"
+check "and the branch"                 0 "$(has_branch feat/f4-the-start-command-41)"
+check "and it says so"                 1 "$(printf '%s\n' "$OUT" | grep -c '^Removed the worktree ')"
+check "opening no session"             0 "$(sent POST '/sessions$')"
+# ONE STORY, NOT TWO: a worktree it has just removed is not one "standing" to reuse.
+check "never saying the removed worktree is reused" 0 "$(printf '%s\n' "$OUT" | grep -ci 'reuse')"
+
+# ANOTHER START'S WORKTREE, made while this run's claim waited: not this run's,
+# whatever the before-and-after lists say, and it must survive this run failing.
+start_config "start: git worktree add .loopable/worktrees/f6-<slug> -b <type>/f6-<slug> origin/main"
+BEFORE=$(worktrees)
+STUB_SIBLING="$SRT sib/other-item-77 $SRT/.loopable/worktrees/sib-other-item-77" \
+  STUB_PATCH_FAIL=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the claim failing, a sibling start meanwhile — exits non-zero" 1 "$RC"
+check "this run's worktree is removed" 0 "$(has_branch feat/f6-the-start-command-41)"
+check "the sibling's worktree survives" "$SRTP/.loopable/worktrees/sib-other-item-77" \
+  "$(wt_at sib/other-item-77)"
+check "and nothing is said about it"   0 "$(printf '%s\n' "$OUT" | grep -c 'sib-other-item-77')"
+check "one worktree more than before: the sibling's" "$((BEFORE + 1))" "$(worktrees)"
+# And another start's BRANCH, made before its worktree, inside the same window.
+start_config "start: git worktree add .loopable/worktrees/f9-<slug> -b <type>/f9-<slug> origin/main"
+STUB_SIBLING="$SRT sib/bare-item-78" STUB_PATCH_FAIL=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the claim failing, a sibling's bare branch meanwhile — exits non-zero" 1 "$RC"
+check "this run's branch is removed"   0 "$(has_branch feat/f9-the-start-command-41)"
+check "the sibling's branch survives"  1 "$(has_branch sib/bare-item-78)"
+check "and nothing is said about it"   0 "$(printf '%s\n' "$OUT" | grep -c 'sib/bare-item-78')"
+
+# A BRANCH WITH NO WORKTREE, made by the command before it failed: deleted when
+# it carries nothing, kept and named when it carries a commit.
+start_config "start: sh $STUB/mkbr-fail.sh clean <type>/f7-<slug>"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the command made a bare branch and failed — exits non-zero" 1 "$RC"
+check "the branch is removed"          0 "$(has_branch feat/f7-the-start-command-41)"
+check "and it says so"                 1 "$(printf '%s\n' "$OUT" | grep -c '^Removed the branch feat/f7-the-start-command-41')"
+start_config "start: sh $STUB/mkbr-fail.sh commit <type>/f8-<slug>"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the bare branch carrying a commit — exits non-zero" 1 "$RC"
+check "the branch is kept"             1 "$(has_branch feat/f8-the-start-command-41)"
+check "and it says why"                1 "$(printf '%s\n' "$OUT" | grep -c '^Kept the branch feat/f8-the-start-command-41: it has 1 commit beyond origin/main')"
+
+# THE BUG'S OWN SHAPE, for a line with no -b: the last word is not the branch
+# the command made, so the lookup fails — and what the run made goes with it.
+start_config "start: sh $STUB/mkwt.sh <type>/f5-<slug> origin/main"
+BEFORE=$(worktrees)
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a line whose last word is not its branch — exits non-zero" 1 "$RC"
+check "and says no worktree is on it"  1 "$(printf '%s\n' "$OUT" | grep -c 'no worktree is checked out on it')"
+check "the worktree it did make is removed" "$BEFORE" "$(worktrees)"
+check "and that branch"                0 "$(has_branch feat/f5-the-start-command-41)"
+
+# NOT MADE IN THIS RUN, NOT TOUCHED: a reused worktree whose claim fails stands.
+start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
+BEFORE=$(worktrees)
+STUB_PATCH_FAIL=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a reused worktree, the claim failing — exits non-zero" 1 "$RC"
+check "the worktree stands"            "$BEFORE" "$(worktrees)"
+check "and the branch"                 1 "$(has_branch "$BRANCH_READY")"
+check "and nothing is said to be removed" 0 "$(printf '%s\n' "$OUT" | grep -c '^Removed')"
+check "it says the worktree stands, to be reused" 1 "$(printf '%s\n' "$OUT" | grep -cF "The worktree at $WT stands")"
 start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
 
 echo
