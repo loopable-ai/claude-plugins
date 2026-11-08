@@ -34,7 +34,7 @@ describe reasoning; the backlog says what is left to do.
 | `revise` | fix an item's title or body. Not its visibility, kind or parent. |
 | `link_items` | this must be done before that |
 | `ask_studio` | a question a person has to answer, into the escalations inbox |
-| `report_progress` | `todo` / `in_progress` / `in_review` / `blocked` / `awaiting_input`, with one sentence about what happened. Not `ready`, `verifying` or `done` — those are a person's. A token its owner minted with the grant may set them, but only when that person asks in the session and names the items; without the grant the API refuses. |
+| `report_progress` | `todo` / `in_progress` / `in_review` / `blocked` / `awaiting_input`, with one sentence about what happened. Not `ready`, `verifying` or `done` — those are a person's, save `verifying` from `in_review` at the merge of an item whose close left a criterion `after_merge`. A token its owner minted with the grant may set them, but only when that person asks in the session and names the items; without the grant the API refuses. |
 
 `add_item` and `propose` are not two ways to do one thing. The line is **where
 the work came from**, not how much anybody is trusted: our own decided work
@@ -271,8 +271,11 @@ so there is no closed session to record it on.
 `/loopable:ship` is what puts a close on file, and `close_session` through the
 MCP is the same payload by hand for a session the command cannot reach. Either
 way a complete close moves the item to `in_review` — that is the report, and
-`report_progress` is not a substitute for it. `verifying` is the deploy and
-`done` is a person accepting the work; the API refuses both from a token.
+`report_progress` is not a substitute for it. `done` is a person accepting the
+work, and the API refuses it from a token. `verifying` is the deploy: a token
+takes it only from `in_review`, at the merge, while the checks a pass close
+left `after_merge` wait for the deploy — and the item comes back to
+`in_review` only by a `close_session` with every criterion met.
 
 If something genuinely has no item, say so on purpose — `Loopable: none —
 <why>` — because a stated exception can be argued with and silence cannot.

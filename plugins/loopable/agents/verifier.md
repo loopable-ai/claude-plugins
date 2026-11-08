@@ -152,13 +152,33 @@ Each criterion gets a status:
 - **met** — you exercised it and it did what the criterion says.
 - **not_met** — you exercised it and it did not. Say what it did instead.
 - **skipped** — you could not exercise it this run. Say what was missing.
+- **after_merge** — only the deploy can show it, and it will be checked after
+  the merge. Give it only when all three hold:
+  1. **The deploy is the only proof.** Nothing before the merge can exercise
+     it — not a local server, not a fixture, not a preview: a header the edge
+     adds, a route that exists once the stack is deployed, a migration the
+     deploy job runs. "I had no time" or "no browser here" is `skipped`, never
+     `after_merge`.
+  2. **Every check before the merge passed.** Each other criterion is `met`,
+     and whatever of this one can be exercised before the merge (its unit test,
+     the code path behind it) was exercised and passed, in this run.
+  3. **A failure is fixed forward without touching production data.** If the
+     check fails after the deploy, a new commit fixes it: nothing it writes to
+     production data must be undone by hand, and no person or client loses
+     anything while the fix lands. A criterion whose failure would need a
+     rollback or a data repair is `skipped` with that as the evidence.
+
+  Name the check in `check`: the command or url that runs after the merge,
+  and what it must show — `curl -sI https://api.example/version` and the
+  header it must carry. The driver runs exactly that once the deploy is out.
 
 A criterion you did not exercise **in this run at this commit** has no status
-other than `skipped`. There is no fourth word, because the close contract has
-only two endings: `ship.sh --close` writes `met` as met and everything else as
-`skipped`, carrying your evidence into the register with the words "not met" in
-front of it, so a person reading the item later sees the decision rather than a
-blank.
+other than `skipped` or, under the rule above, `after_merge`. There is no other
+word, because the close contract has only three endings: `ship.sh --close`
+writes `met` as met, `after_merge` on a `pass` as after_merge with its check,
+and everything else as `skipped`, carrying your evidence into the register with
+the words "not met" in front of it, so a person reading the item later sees the
+decision rather than a blank.
 
 Screenshots go under the evidence directory `--prepare` named, one per browser
 criterion at least, named for the criterion. Give the **absolute path** in the
@@ -166,7 +186,10 @@ report; `--close` uploads them and puts their ids in the contract.
 
 ## 6. Give one verdict
 
-- **pass** — every criterion is `met`.
+- **pass** — every criterion is `met`, or `after_merge` under the rule above.
+  A pass that owes a check after the merge is still a pass: the merge guard
+  reads it as one, the item goes to `verifying` at the merge, and it comes
+  back to `in_review` only when the after-merge check is met.
 - **fail** — any criterion is `not_met`. Something is broken or missing.
 - **not_run** — nothing was verified this run: no environment, no browser, the
   app would not start. `not_run` is first-class and honest. The merge guard
@@ -194,9 +217,10 @@ the item next.
     {
       "text": "the criterion, verbatim from the brief",
       "verify": "browser | http | eval | manual",
-      "status": "met | not_met | skipped",
+      "status": "met | not_met | skipped | after_merge",
       "evidence": "what you did and what you saw, in one or two sentences",
       "implemented_at": "a path, a route, a test name — where it lives",
+      "check": "after_merge only: the command or url run after the merge, and what it must show",
       "screenshot": "/absolute/path/under/.git/loopable/evidence/name.png"
     }
   ]

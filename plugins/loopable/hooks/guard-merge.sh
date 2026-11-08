@@ -25,6 +25,12 @@
 #     longer about the thing being merged. One string comparison is the whole
 #     difference between a report and evidence.
 #
+# A PASS THAT OWES A CHECK AFTER THE MERGE IS A PASS (365). A close may leave a
+# criterion `after_merge` — one only the deploy can show — and its verdict is
+# still `pass`, which is all this guard reads: the merge is what lets that
+# check run, so refusing it would keep the check from ever happening. The
+# driver runs it after the deploy, with the item in `verifying`.
+#
 # WHATEVER THE ITEM'S STATUS (brief rev 2). The record of a close is the
 # evidence; a status is a sentence somebody typed, and an item moved off
 # in_review after a failed close is still an item whose head failed.

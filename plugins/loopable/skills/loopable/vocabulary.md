@@ -318,7 +318,9 @@ fault anything is.
 - **ready** — groomed: criteria somebody could act on, and somewhere to run it.
 - **in_progress** — somebody or something is working on it.
 - **in_review** — the work is written and a person has to read it.
-- **verifying** — merged and deployed; the checks are running.
+- **verifying** — merged, and waiting on the deploy: a criterion only the
+  deploy can show is checked after the merge, and the item goes back to
+  in_review once every criterion is met.
 - **done** — accepted by a person.
 - **blocked** — waiting on something else in the world.
 - **awaiting_input** — waiting on an answer from a person.
@@ -327,8 +329,10 @@ fault anything is.
 
 The first six are a road and the last three are places to stand. Who may take
 which step is not the same question: a person may take any of them, and an
-agent may report its way to `in_review` and no further — it does not decide
-that a deploy happened, and it does not accept what it built. It grooms only
+agent may report its way to `in_review`. It says `verifying` only of an item
+in review, when it merges it, and brings it back to `in_review` only by
+closing a session with every criterion met — the close after the deploy; it
+does not accept what it built. It grooms only
 what it filed itself: an agent sets `ready` only on an item it filed itself,
 through the same token, from `todo`, and only once nothing is missing for the
 item to be ready; anything a person or another token filed is groomed by a

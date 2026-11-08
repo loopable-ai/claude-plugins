@@ -292,14 +292,17 @@ Nothing has been changed."
   say '   "environment": "the base url that was driven, or none",'
   say '   "criteria": [{"text": "<the criterion, verbatim>",'
   say '                 "verify": "browser | http | eval | manual",'
-  say '                 "status": "met | not_met | skipped",'
+  say '                 "status": "met | not_met | skipped | after_merge",'
   say '                 "evidence": "what was done and what was seen",'
   say '                 "implemented_at": "a path, a route, a test name",'
+  say '                 "check": "for after_merge: what runs after the merge, and what it must show",'
   say '                 "screenshot": "an absolute path under evidence/, for browser ones"}]}'
   say
   say "Every criterion above must appear, matched by its text. A close cannot leave"
   say "one open: not_met is recorded as skipped, which is how the register says"
-  say "\"a person decided this one is not met\" and keeps it visible."
+  say "\"a person decided this one is not met\" and keeps it visible. after_merge"
+  say "is a pass's alone: it is recorded with its check, and on any other verdict"
+  say "it is recorded as skipped, saying the check was owed after a merge."
   say
   say "Now run the verifier and the reviewer, then: ship.sh --close"
   exit 0
@@ -369,19 +372,34 @@ EOF
 Run the verifier again over the whole brief. Nothing has been closed."
 fi
 
-# not_met BECOMES skipped, AND SAYS SO. `met` and `skipped` are the only two
-# endings a close may write (CRITERION_ENDINGS in api/lib/sessions.mjs) —
+# not_met BECOMES skipped, AND SAYS SO. `met`, `skipped` and `after_merge` are
+# the only endings a close may write (CRITERION_ENDINGS in api/lib/sessions.mjs) —
 # `open` is absent because a complete close whose criterion is still open
 # contradicts itself. So a criterion the verifier could not get to met is
 # recorded as the decision it is, with the words "not met" carried into
 # implemented_at where a person reading the register will see them.
-CRITERIA=$(printf '%s' "$MAPPED" | jq -c '[
+#
+# after_merge STAYS after_merge ON A PASS (365): a criterion only the deploy
+# can show, recorded with the CHECK that will run after the merge in
+# implemented_at — which is where the driver reads what to run, and where a
+# person reads what is owed. The API takes it from a pass alone (a close that
+# is not merged owes nothing after a merge), so on any other verdict it is the
+# decision skipped, saying the check was owed — never a refusal of the close.
+CRITERIA=$(printf '%s' "$MAPPED" | jq -c --arg verdict "$VERDICT" '[
   .rows[] |
   (.match.status // "skipped") as $s |
   (.match.implemented_at // .match.evidence // "no note") as $where |
+  ((.match.check // "") | if . == "" then $where else . end) as $check |
   { id: .id,
-    implemented_at: (if $s == "met" then $where else "not met — " + $where end),
-    status: (if $s == "met" then "met" else "skipped" end) }]')
+    implemented_at: (
+      if $s == "met" then $where
+      elif $s == "after_merge" and $verdict == "pass" then $check
+      elif $s == "after_merge" then "not checked — owed after the merge: " + $check
+      else "not met — " + $where end),
+    status: (
+      if $s == "met" then "met"
+      elif $s == "after_merge" and $verdict == "pass" then "after_merge"
+      else "skipped" end) }]')
 
 # --------------------------------------------------------- the cost, if any --
 #
@@ -522,7 +540,9 @@ findings() {
   printf '%s' "$MAPPED" | jq -r '.rows[] |
     "- [" + (if (.match.status // "skipped") == "met" then "x" else " " end) + "] " +
     .text + " — " + (.match.status // "skipped") + " (" + .verify + ")" +
-    (if (.match.evidence // "") != "" then "\n      " + .match.evidence else "" end)'
+    (if (.match.evidence // "") != "" then "\n      " + .match.evidence else "" end) +
+    (if (.match.status // "") == "after_merge" and (.match.check // "") != ""
+     then "\n      checked after the merge: " + .match.check else "" end)'
   printf '\n## Verification\n\n'
   printf 'Verdict `%s`' "$VERDICT"
   [ -n "$REASON" ] && printf ' — %s' "$REASON"

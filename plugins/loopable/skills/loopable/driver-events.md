@@ -117,16 +117,17 @@ it merged on, posted once `gh pr view` says `MERGED`.
 ### `after_merge`
 
 What the driver ran after a merge because `AGENTS.md` names it — a release tag
-pushed and the run it started, a deploy verified by sha — and what it showed.
-One event per step. Kind `result`, on the session the `merged` went on.
+pushed and the run it started, a deploy verified by sha — or because the close
+left a criterion `after_merge` — the check it named — and what it showed. One
+event per step. Kind `result`, on the session the `merged` went on.
 
 | field | |
 |---|---|
 | `event` | `"after_merge"` |
-| `step` | what ran: `"release_tag"` or `"deploy"` |
+| `step` | what ran: `"release_tag"`, `"deploy"` or `"check"` (one after-merge criterion's check) |
 | `sha` | the merge commit's sha |
-| `result` | `"green"` or `"red"` — a deploy whose sha does not match is red |
-| `evidence` | the tag, the run's url, or what the version check answered |
+| `result` | `"green"` or `"red"` — a deploy whose sha does not match is red, and so is a check that did not show what it names |
+| `evidence` | the tag, the run's url, what the version check answered, or what the check showed — and, for a red check, the bug filed for it |
 
 ### `handed_off`
 

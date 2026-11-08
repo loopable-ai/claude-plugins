@@ -346,6 +346,13 @@ touches_loopable; body "Fixes things.
 
 Loopable: $REVIEW"
 quiet "in_review, closed at this HEAD, verdict pass"
+# A PASS THAT OWES A CHECK AFTER THE MERGE IS A PASS (365): the deploy is the
+# only proof of that criterion, so the merge is what lets it be checked, and
+# refusing it would keep the check from ever running.
+sessions_are "[{id:\"s-1\",state:\"complete\",head_sha:\"$HEAD_SHA\",verdict:\"pass\",verdict_reason:\"\",
+  criteria:[{status:\"met\"},{status:\"after_merge\",implemented_at:\"curl the deployed route\"}]}]"
+quiet "a pass carrying an after_merge criterion"
+closed "$HEAD_SHA" pass
 body "loopable: $REVIEW"
 quiet "the marker is case-insensitive"
 # S1.10 COMPOSES. Whatever follows the marker is resolved through lib.sh, so a
@@ -2068,7 +2075,8 @@ report() { # report <verdict> <c1 status> <c2 status> [reason]
        {text: "The command refuses a dirty tree", verify: "manual", status: $a,
         evidence: "ran it with a modified file", implemented_at: "bin/ship.sh"},
        {text: "the PULL request  names its item!", verify: "browser", status: $b,
-        evidence: "read the body", implemented_at: "bin/ship.sh", screenshot: $shot}]}' \
+        evidence: "read the body", implemented_at: "bin/ship.sh", screenshot: $shot,
+        check: "open the deployed pull request page and read its body"}]}' \
     > "$SDIR2/verify.json"
   printf '# Verification\n\nverdict %s\n' "$1" > "$SDIR2/verify.md"
   printf '# Review\n\n## Verdict\nship — nothing blocking\n' > "$SDIR2/review.md"
@@ -2371,6 +2379,32 @@ run_ship --close
 check "a not_run banner: let through, on the record" "1 0" \
   "$(grep -c 'The merge guard lets this through with a warning' "$STUB_PR_SENT") $(grep -c 'merge guard refuses' "$STUB_PR_SENT")"
 
+echo
+echo " a check only the deploy can show is owed after the merge (365):"
+# A PASS CARRIES IT AS after_merge, with the check in implemented_at — which
+# is where the driver reads what to run after the deploy.
+report pass met after_merge
+run_ship --close
+P=$(closed_payload)
+check "a pass with one after_merge — exits 0" 0 "$RC"
+check "after_merge reaches the close"  after_merge \
+  "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .status')"
+check "carrying its check, not where it landed" "open the deployed pull request page and read its body" \
+  "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .implemented_at')"
+check "the verdict is still a pass"    pass "$(printf '%s' "$P" | jq -r '.verdict')"
+check "and the pull request says what is owed" 1 \
+  "$(grep -c 'checked after the merge: open the deployed pull request page' "$STUB_PR_SENT")"
+# ANY OTHER VERDICT IS NOT MERGED, so it owes nothing after a merge: the API
+# refuses after_merge there, and ship.sh records the decision instead.
+report fail not_met after_merge 'the dirty tree went through'
+run_ship --close
+P=$(closed_payload)
+check "a fail with one after_merge still closes" 1 "$(printf '%s\n' "$P" | grep -c .)"
+check "and records it skipped"         skipped \
+  "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .status')"
+check "saying the check was owed"      1 \
+  "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .implemented_at' | grep -c '^not checked — owed after the merge: open the deployed')"
+
 # THE SAME CHECKS GUARD BOTH HALVES, which is what makes them worth having:
 # a tree that went dirty while the two agents were running means the reports
 # describe a commit that is no longer HEAD, and closing anyway would write a
@@ -2513,6 +2547,26 @@ AFTER_MERGE=$(printf '%s\n' "$MERGE_STEP" | awk 'm; index($0, "gh pr merge <pr> 
 check "and posts worktree_removed on the saved id once the tree is gone" none \
   "$(for w in 'git worktree list' 'post `worktree_removed`' '<archive>/worktree_removed'; do
        printf '%s\n' "$AFTER_MERGE" | grep -qF -- "$w" || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
+# THE AFTER-MERGE STEP (365), after the merge line and in its own bullet: the
+# item to verifying, the deploy run by the merge sha, /version against
+# origin/main:api, each check, the after-merge close, a failed check a bug.
+OWED_STEP=$(printf '%s\n' "$AFTER_MERGE" |
+  awk '/^- \*\*A criterion the close left `after_merge`\*\*/ {f = 1; print; next} f && /^- / {f = 0} f' |
+  tr '\n' ' ' | tr -s ' ')
+check "and checks what the close left after_merge, in order" none \
+  "$(for w in 'to `verifying`' 'gh run list --commit <merge sha>' '/version' 'origin/main:api' \
+              "criterion's check exactly as its \`implemented_at\`" '`close_session` complete' \
+              'every criterion `met`' '**A failed check is a new bug**' 'kind `bug`'; do
+       printf '%s\n' "$OWED_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
+# And the verifier gives after_merge on all three conditions, or not at all.
+OWED_RULE=$(awk '/^- \*\*after_merge\*\* —/ {f = 1} f && /^A criterion you did not exercise/ {f = 0} f' \
+  "$AGENTS/verifier.md" | tr '\n' ' ' | tr -s ' ')
+check "the verifier says after_merge on three conditions only" none \
+  "$(for w in '**The deploy is the only proof.**' '**Every check before the merge passed.**' \
+              '**A failure is fixed forward without touching production data.**' 'Name the check in `check`'; do
+       printf '%s' "$OWED_RULE" | grep -qF -- "$w" || printf '[%s] ' "$w"
      done | sed 's/ $//' | grep . || echo none)"
 # AND THE CLEANUP KNOWS WHETHER THAT POST HAPPENED: the marker the merge step
 # writes is what it reads, so a later session neither posts twice nor skips it.

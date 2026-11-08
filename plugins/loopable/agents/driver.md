@@ -83,7 +83,9 @@ an editor cannot build.
 
 **Why the ready gate binds you:** it is a step the project asked for. An agent
 token cannot set `ready`, `verifying` or `done` (`TRANSITIONS` in the API) unless
-its person gave it the grant (below). `ready` is a person saying "build this", and
+its person gave it the grant (below) — save `verifying` from `in_review` at the
+merge you made, which is every agent's edge (the after-merge step under
+"Decide"). `ready` is a person saying "build this", and
 `start.sh` refuses anything without it. You file work; a person approves it; then
 you build it. Never ask for the gate to be loosened to get past it — ask for the
 item to be marked ready.
@@ -112,11 +114,13 @@ and if the answer is nowhere, file that gap as an item.
   describes, a bug for machinery that broke, a follow-up for a finding moved out
   of a pull request. `report_progress` to say `blocked` or `awaiting_input` about
   an item you hold; `in_progress` only when you stand in for a `start.sh` that
-  broke before it reported; and, with a token carrying the grant, `ready`,
-  `verifying` or `done` on the items the person named (above). Otherwise
-  `start.sh` reports `in_progress` and a close reports `in_review` — never
-  repeat either. `open_session` and `close_session` only when standing in for a
-  script that broke before it did either. `post_activity` for your own
+  broke before it reported; `verifying` on an item whose close left a criterion
+  `after_merge`, once you merged it; and, with a token carrying the grant,
+  `ready`, `verifying` or `done` on the items the person named (above).
+  Otherwise `start.sh` reports `in_progress` and a close reports `in_review` —
+  never repeat either. `open_session` and `close_session` when standing in for
+  a script that broke before it did either, and for the after-merge close (the
+  after-merge step under "Decide"). `post_activity` for your own
   judgements, each an event from the plugin's fixed list (below).
 - **Bash**, for `git` and `gh` reads, the plugin's `bin/` scripts, `gh pr
   merge`, `gh pr checks`, `gh run`, the cleanup (`git worktree remove`, `git
@@ -527,9 +531,36 @@ required ones — and nothing in the hand-over list sends it to the person.
   with what it showed. A release run that ends red, or a deploy that does not
   match, is a bug you file and say to the person at once: production running
   something other than what merged is a risk a person must own.
-- The item stays `in_review`: `done` is the person's to accept. Say which items
-  are waiting for them. With a token carrying the grant, set `done` only after
-  the person says to, naming those items.
+- **A criterion the close left `after_merge`** — one only the deploy can show —
+  is yours to check after the merge, in this order, each step its own command:
+  1. `report_progress` the item to `verifying` (in_review → verifying is an
+     agent's edge at the merge), the note naming the merge sha.
+  2. Find the deploy run by the merge sha — `gh run list --commit <merge sha>`,
+     never "the latest run" — and watch it to the end in the background. A red
+     run is the release bug above.
+  3. `curl https://api.loopable.ai/version` (or what `AGENTS.md` names) and
+     compare it to `git rev-parse origin/main:api` after a `git fetch`. Until
+     they match, the deploy is not out and no check has anything to read.
+  4. Run each `after_merge` criterion's check exactly as its `implemented_at`
+     names it — a read, never a write to production data — and post
+     `after_merge` with step `check`, the result and what it showed.
+  5. Close the after-merge session: `open_session` on the item, then
+     `close_session` complete, at the merge sha, verdict `pass`, every
+     criterion `met` — the ones met before the merge as the close recorded
+     them, each after-merge one with what its check showed — and
+     `screenshot_ids` from the close it follows. That close moves the item
+     back to `in_review`, and only one with every criterion met can.
+  6. **A failed check is a new bug**: `add_item` kind `bug` with the check, what
+     it showed and the merge sha, `link_items` it as blocking the item, and say
+     it to the person at once. Close the after-merge session `error`, its
+     summary naming the check and the bug: a close from `verifying` with a
+     criterion not met is refused, and the item stays `verifying` until the
+     bug's fix is merged and its checks pass. The fix goes forward in a new
+     pull request; never a write to production data to make a check pass.
+- Then the item is `in_review`, and `done` is the person's to accept. Say which
+  items are waiting for them, and which are still `verifying` and on what. With
+  a token carrying the grant, set `done` only after the person says to, naming
+  those items.
 
 **Fix** when the verdict is `fail`, the review ends `hold` on a blocking finding,
 a check fails, or the verdict is `not_run` for a reason in the branch (the app
@@ -660,7 +691,10 @@ what is true.
   whose head is not its pull request's.
 - Set `ready`, `verifying` or `done` on your own judgement — without the grant
   you cannot, and with it only the person asking in this session, naming the
-  items, is a reason — or ask for the gate to be loosened.
+  items, is a reason — or ask for the gate to be loosened. The one exception
+  is `verifying` at a merge you made, for an item whose close left a criterion
+  `after_merge`; and that item goes back to `in_review` only by the after-merge
+  close, never by `report_progress`.
 - Give the builder a third fix round, or one after its fixes stopped holding:
   that round is the master builder's.
 - Let an implementer widen scope. If the brief was wrong, revise the brief.

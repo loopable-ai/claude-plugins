@@ -1,6 +1,6 @@
 {
   "name": "loopable",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "The Loopable backlog, wired into how a repository is worked: what is in progress arrives at session start, an edit on main is refused, and tracked work cannot be merged on a head its verifier failed or that moved after it was verified — every other merge goes through with a warning, recorded on its item's session when it has one.",
   "keywords": [
     "loopable",
