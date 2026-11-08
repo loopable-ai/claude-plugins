@@ -2492,11 +2492,35 @@ MISSING=$(
     while read -r p; do [ -f "$HERE/../$p" ] || printf '%s ' "$p"; done
   grep -oE 'loopable:[a-z-]+' "$AGENTS/driver.md" | sort -u | sed 's/^loopable://' |
     while read -r n; do
-      [ -f "$AGENTS/$n.md" ] || [ -f "$HERE/../commands/$n.md" ] || printf 'loopable:%s ' "$n"
+      [ -f "$AGENTS/$n.md" ] || [ -f "$HERE/../commands/$n.md" ] ||
+        [ -f "$HERE/../skills/$n/SKILL.md" ] || printf 'loopable:%s ' "$n"
     done
 )
 MISSING=${MISSING% }
 check "every script and agent the driver names exists" none "${MISSING:-none}"
+# /loopable:plan ASKS EVERY QUESTION UP FRONT (375), and only a person starts
+# it: a model that invoked it on its own would be asking the person questions
+# nobody asked it to ask. Its answers go into the backlog — write_brief for the
+# brief, link_items for the order — and never into a plan file, which the
+# driver does not read and so would be answers nobody acts on.
+PLAN="$HERE/../skills/plan/SKILL.md"
+check "skills/plan/SKILL.md is named plan" plan "$(fm "$PLAN" 2>/dev/null | sed -n 's/^name: //p')"
+check "and says when to use it" 1 "$(fm "$PLAN" 2>/dev/null | grep -c '^description: .')"
+check "and only a person invokes it" true \
+  "$(fm "$PLAN" 2>/dev/null | sed -n 's/^disable-model-invocation: //p')"
+check "it records through write_brief and link_items" none \
+  "$(for w in write_brief link_items; do
+       grep -qF "\`$w\`" "$PLAN" 2>/dev/null || printf '%s ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "and names no plan file" none \
+  "$(grep -oE '[A-Za-z0-9_./-]*(plan\.md|plans/|\.fountain)[A-Za-z0-9_./-]*' "$PLAN" 2>/dev/null |
+       sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+# write_brief REPLACES EVERY FIELD (375, round 1): a revision carrying only the
+# new rows erases the assumptions and out-of-scope rows the brief already had.
+check "it carries the brief's existing rows into the rewrite" none \
+  "$(for w in 'replaces EVERY field' 'every existing `assumptions` and `out_of_scope` row'; do
+       grep -qF -- "$w" "$PLAN" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "the driver reads its decided-in-advance lines" 1 \
+  "$(grep -c 'Decided in advance' "$AGENTS/driver.md" | sed 's/^[1-9][0-9]*$/1/')"
 # THE DRIVER'S EVENTS ARE A FIXED LIST (337), read by name by whatever counts
 # them, so the list and the prose that posts them cannot drift: the list keeps
 # the six the brief named and the five 361 added, the driver points at the

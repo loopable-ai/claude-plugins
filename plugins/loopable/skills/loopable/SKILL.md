@@ -1,6 +1,6 @@
 ---
 name: loopable-backlog
-description: Use when working in a repository that belongs to a Loopable project — planning, picking up work, or landing a PR. Explains that the Loopable backlog is the source of truth for that work, which MCP tool does what, why an edit on main is refused, why a PR touching tracked paths must name its work item, and what the session hooks already report on your behalf. Also defines the vocabulary — feature, epic, story, task, bug, decision, session, brief, environment and the item states — in vocabulary.md beside this file. Triggers on "what's next", "start on this item", "/loopable:start", "/loopable:ship", "ship it", "close the session", "open the PR", "the loopable backlog", "report progress", "propose", "add_item", "landing a PR", "why was my edit refused", "post_activity", "open_session", ".loopable.yaml", "epic", "story", "task", "bug", "what kind", "which kind".
+description: Use when working in a repository that belongs to a Loopable project — planning, picking up work, or landing a PR. Explains that the Loopable backlog is the source of truth for that work, which MCP tool does what, why an edit on main is refused, why a PR touching tracked paths must name its work item, and what the session hooks already report on your behalf. Also defines the vocabulary — feature, epic, story, task, bug, decision, session, brief, environment and the item states — in vocabulary.md beside this file. Triggers on "what's next", "start on this item", "/loopable:plan", "plan the batch", "/loopable:start", "/loopable:ship", "ship it", "close the session", "open the PR", "the loopable backlog", "report progress", "propose", "add_item", "landing a PR", "why was my edit refused", "post_activity", "open_session", ".loopable.yaml", "epic", "story", "task", "bug", "what kind", "which kind".
 ---
 
 # The Loopable backlog is the source of truth
@@ -46,6 +46,17 @@ token the spec is written straight onto the item, and a caller from outside
 the studio has it proposed for a person to accept. The tool tries the direct
 path, falls back to the queue if the API refuses it, and its result says which
 happened — read that before assuming somebody has to accept anything.
+
+## Planning a batch: `/loopable:plan`
+
+Before several items are built, `/loopable:plan [<ref> ... | <epic ref>]` reads
+each one's pack and what is in flight, asks the person every question only they
+can answer in one pass, and — once they approve — records the answers in the
+backlog and nowhere else: `Answered:` and `Decided in advance: if X, then Y`
+lines in each item's brief through `write_brief`, the order between items as
+blocking links through `link_items`. A person starts it; it is never invoked on
+its own. When you read a brief carrying those lines, they are questions already
+answered: act on them rather than asking again.
 
 ## Starting work: pull the pack first
 

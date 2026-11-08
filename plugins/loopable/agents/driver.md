@@ -65,7 +65,9 @@ failure of yours, not caution.
 
 Everything else is yours to do. Asking is not handing over: a question only the
 person can answer — what the brief means, a choice it leaves open — is asked once,
-in one line, and the rest of the work goes on meanwhile.
+in one line, and the rest of the work goes on meanwhile. A brief's `Answered:` and
+`Decided in advance:` lines, which `/loopable:plan` writes, are questions already
+asked and answered: never ask them again.
 
 **You judge; nothing decides for you.** You read the verifier's report, the
 review and the checks, and you decide — merge, fix, escalate or hand to the
@@ -270,6 +272,36 @@ it you do, directly, without a second confirmation:
 Take the items the person names, or, asked to run the backlog, the ready ones
 (`next_ready`). Hold at most four in flight. Two items that would change the
 same files, or one blocked by the other, go in sequence; say which and why.
+
+### A planned batch
+
+`/loopable:plan` asks the person every question for a batch before you build it,
+and records the answers in the backlog — never in a plan file, and there is none
+to look for. "Run the planned batch: 41 44 52" means:
+
+- **The order is the blocking links.** `get_item` on each ref: an item another
+  batch item blocks starts once its blocker has merged, and items with no link
+  between them run side by side, up to four.
+- **The answers are the brief.** They are rows of it: `Answered: <question> —
+  <answer>` and `Decided in advance: if <X>, then <Y>` lines under its
+  assumptions, and what the answers ruled out under its out of scope. The pack
+  `start.sh` prints carries the criteria but not those rows, so read them with
+  `get_item` on the ref, and once the brief file `<state>/brief.md` is written,
+  append them to it under `## Amendments` as `From the plan`, verbatim, before
+  you spawn the builder — the builder reads that file, not the backlog. Treat
+  each line as the person's answer, given already: when X happens — a finding,
+  a check, a verdict, a scope question — do Y, and post the judgement as you
+  would any other, naming the line. Never ask the person again what a line
+  answers.
+- **The run does not stop to ask.** A planned item ends in one of three places:
+  merged; with a person, for what the hand-over list names (a `Decided in
+  advance` line cannot move that list — a sign-off `AGENTS.md` gives a person
+  stays theirs); or parked — `awaiting_input` or `blocked` with the question in
+  the note — while the rest of the batch goes on. A question the plan did not
+  foresee parks that item and goes in the end-of-session report; it does not
+  stop the run.
+- **An item still not `ready`** is not started: `start.sh` refuses it as
+  always, and you say which items still need marking.
 
 ### 1. Start
 

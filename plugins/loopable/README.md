@@ -6,9 +6,10 @@ A repository names its project in `.loopable.yaml` at the root (see the skill
 for the three keys). From then on six hooks apply, each doing one mechanical
 thing — anything needing judgement is a skill, not a hook — plus two commands,
 which are the two ends of a piece of work (`/loopable:start` begins one,
-`/loopable:ship` finishes it), and five agents: the `verifier` and `reviewer`
-that ship runs, and the `driver`, `builder` and `masterbuilder` that run the
-commands for you.
+`/loopable:ship` finishes it), a planning skill, `/loopable:plan`, that asks
+every question for a batch before any of it is built, and five agents: the
+`verifier` and `reviewer` that ship runs, and the `driver`, `builder` and
+`masterbuilder` that run the commands for you.
 
 | hook | event | |
 |---|---|---|
@@ -472,6 +473,34 @@ sometimes not:
    harness whose reports mean nothing. The pull request says so in a banner; the
    merge guard refuses a `fail` at the commit being merged, and records a
    `not_run` merge it lets through.
+
+## Planning a batch
+
+```
+/loopable:plan [<ref> <ref> ... | <epic ref>]
+```
+
+`skills/plan/SKILL.md`, a port of the plan skill in Avanti Studio's fountain
+plugin with the backlog in place of GitHub issues. It runs in plan mode, before
+the driver builds anything: it takes the refs it is given, an epic's open
+children, or with nothing the ready queue plus the `todo` items the person
+names; reads each item's pack and links (`pull_item`, `get_item`) and what is
+in flight (`in_progress` and `in_review` items, `gh pr list`, `git worktree
+list`); judges each `ready`, `ready once answered` or `not now`; and asks the
+person every question only they can answer in one pass of `AskUserQuestion`,
+each naming its item, its recommendation first.
+
+Nothing is written until the person approves, and then **only into the
+backlog**: each item's answers and every `Decided in advance: if X, then Y`
+fork go into its brief through `write_brief` (the next revision, the open
+questions it answered cleared), the order between items into blocking links
+through `link_items`, and the items the person names ready through
+`report_progress`, when the token carries the grant. There is no plan file, in
+the repository or beside it: the driver reads a planned batch from the briefs
+and the links, treats those lines as answered, and runs each item to a merge, a
+person, or parked, without a question mid-run. `test.sh` holds the skill's
+frontmatter (`disable-model-invocation`, so only a person starts it) and that
+it names `write_brief` and `link_items` and no plan file.
 
 ## The driver
 
