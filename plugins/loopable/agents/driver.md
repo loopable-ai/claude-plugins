@@ -126,7 +126,12 @@ and if the answer is nowhere, file that gap as an item.
   `$(git -C <wt> rev-parse --absolute-git-dir)/loopable`, which cannot be
   committed: the brief file `<state>/brief.md`, each round's copy under
   `<state>/rounds/`, and, standing in for a script, the files that script
-  writes there.
+  writes there — and, just before a merge, its copy in the main checkout's git
+  dir, `<archive>` =
+  `$(git -C <main> rev-parse --absolute-git-dir)/loopable/archive/<ref>/`,
+  which outlives the worktree and cannot be committed either. Once an item's
+  worktree is gone, every step below that reads `<state>/brief.md`,
+  `<state>/rounds/` or `<state>/session` reads it in `<archive>` instead.
 - **Safe operational writes**, when the person asks or the work needs them:
   re-sending an invite, a read-only probe (`curl` a `/version`, read a log, a
   `describe` call), and a release tag `AGENTS.md` names, pushed at the merge
@@ -215,20 +220,29 @@ pull request is merged or closed and whose tree is clean. From `<main>`:
    local fixtures, a database dump — is named to the person, and that worktree
    stays until they say.
 3. Read each one's session id from its `<state>/session` first: the removal
-   takes `<state>` with it.
+   takes `<state>` with it. Copy `<state>` to its `<archive>` as the merge step
+   does, unless the merge already did.
+
+A worktree whose merge removed it — `gh pr merge --delete-branch` takes the
+worktree and its local branch — is already cleaned, not an error: it is not in
+`git worktree list`, or is listed `prunable` with its path gone, which one `git
+worktree prune` clears. Its branch is deleted only when `git branch --list <b>`
+still shows it. Its `worktree_removed` went out at the merge when
+`<archive>/worktree_removed` exists; when that file is missing, post it now on
+the id in `<archive>/session` and write the marker the same way.
 4. Remove them in one Bash call, each on its own so one refusal stops none of
    the others: `for w in <wt>...; do git worktree remove "$w" || echo "kept: $w"; done`.
    Never `--force`: a tree git refuses has something in it. Name it to the
    person with what git said, and leave it.
-5. Delete the branches of every worktree that went in one `git branch -D <b1>
-   <b2> ...`: a squash-merged branch needs `-D`, and a project that asks before a
+5. Delete the branches of every worktree that went and whose branch still
+   exists in one `git branch -D <b1> <b2> ...`: a squash-merged branch needs `-D`, and a project that asks before a
    deletion asks once, not once per item. Local branches only; a remote branch is
    not yours to delete.
 6. Post `worktree_removed` on each session you read, and say in one line what
    went and what stayed, with why.
 
-During the session, a merged item's worktree waits for the cleanup at the end
-rather than going one at a time.
+During the session, a merged item's worktree usually goes with its merge (the
+merge step below); one the merge left behind goes in the next cleanup.
 
 ## Filing work
 
@@ -471,6 +485,19 @@ completed green — when it says every check, that means every one, not only the
 required ones — and nothing in the hand-over list sends it to the person.
 
 - Wait for checks with `gh pr checks <pr> --watch` run in the background.
+- **Save the state first.** With gh 2.103, `gh pr merge --delete-branch` run
+  from `<main>` removes the item's worktree and its local branch as part of the
+  merge, before anything of yours runs after it, and `<state>` goes with it. So,
+  as separate commands, before the merge:
+  1. Read `<state>/session` and keep the id: `worktree_removed` goes on it.
+  2. `git -C <wt> status --porcelain --ignored`. Installed dependencies and
+     build output (`node_modules/`, `dist/`) may go with the worktree; anything
+     else — a `.env`, local fixtures, a database dump, an untracked file — holds
+     the merge: name it to the person, with the path, and wait for their word.
+  3. Copy `<state>/brief.md`, `<state>/rounds/`, `<state>/session` and
+     `<state>/item` into `<archive>` (`loopable/archive/<ref>/` in `<main>`'s
+     git dir): `mkdir -p <archive>`, then `cp -R` each one there. It survives
+     the worktree's removal and, being under `.git`, cannot be committed.
 - Merge with the repository's method and **nothing else on the line**:
   `gh pr merge <pr> --<method> --delete-branch`, run from `<main>` so `gh`
   knows the repository. The guard reads the PR argument the way `gh` does, but
@@ -479,14 +506,19 @@ required ones — and nothing in the hand-over list sends it to the person.
 - A refusal from the guard says why — a failed or a moved head. Read it; never
   work around it. A warning that it let the merge through with `guard_allowed`
   means it found nothing to refuse, not that the head passed: you merge only on
-  the rule above. A
-  non-zero exit that is not the guard's may be `gh` failing to delete the local
-  branch, which its worktree still holds, after the merge succeeded: check
-  `gh pr view <pr> --json state` before reading it as a failed merge. The
-  branch goes in the cleanup.
+  the rule above. A merge that worked exits 0 with no output, and gh 2.103 has
+  by then removed the worktree and its local branch with it. Any exit that is
+  not the guard's is read through `gh pr view <pr> --json state` before it is
+  taken as a failed merge.
 - Once it says `MERGED`, post `merged` on the session that closed with the
   `pass`: the pull request number, the merge commit's sha and your one sentence
   of why, naming any finding that went to a follow-up.
+- Then `git worktree list --porcelain`. When `<wt>` is gone (or `prunable`),
+  post `worktree_removed` on the session id you saved — the path, the branch
+  and the pull request — then write the posted activity's id into
+  `<archive>/worktree_removed`, so a later cleanup knows it went out; and run
+  `git branch --list <branch>`: a branch gh left goes with `git branch -D`.
+  When `<wt>` is still there, it goes in the next cleanup like any other.
 - After the merge, do any release step `AGENTS.md` names for what changed — a
   tag pushed at the merge commit, say — and watch the run it starts in the
   background. When `AGENTS.md` says how a deploy is verified, find the run for
@@ -506,7 +538,9 @@ would not start because of the change):
 1. Append the round's amendment to `<state>/brief.md`: dated, at most ten lines,
    each finding verbatim with its `path:line` and the absolute path of the report
    or log that shows it (`<state>/rounds/<n>/`, or `gh run view <id>
-   --log-failed` for a red check).
+   --log-failed` for a red check). Once the worktree is gone, the rounds and
+   the brief file are in `<archive>` (`loopable/archive/<ref>/`), and that is
+   where they are read and amended.
 2. Post `fix_round` on the session that closed with that verdict: the round
    number, its source — `verifier`, `reviewer` or `check` — and the finding
    verbatim, one event per source.
@@ -561,8 +595,9 @@ step 3 of Fix:
    `fix_round`.
 4. Spawn `loopable:masterbuilder` in the background, named `masterbuilder-<ref>`,
    with the ref, the worktree path, the branch, the pull request url, its head
-   sha, the path of `<state>/brief.md`, the `<state>/rounds/` directory, the path
-   of `AGENTS.md`, and your reason. Nothing else: the diagnosis is its job.
+   sha, the path of `<state>/brief.md`, the `<state>/rounds/` directory — their
+   `<archive>` copies once the worktree is gone — the path of `AGENTS.md`, and
+   your reason. Nothing else: the diagnosis is its job.
 
 Its report carries a diagnosis of at most ten lines. Re-ship as for any round.
 Past its second round, say in each amendment why it still converges. When its

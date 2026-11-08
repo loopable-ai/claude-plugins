@@ -26,6 +26,10 @@ row nothing will ever read.
   opened, when the script broke before it opened one.
 - **A worktree removed** goes on the session recorded in that worktree's state
   directory, read before the removal: removing the worktree removes the file.
+  `gh pr merge --delete-branch` removes it as part of the merge, so the driver
+  reads it and copies it to
+  `$(git -C <main> rev-parse --absolute-git-dir)/loopable/archive/<ref>/session`
+  before the merge, and reads that copy afterwards.
 - **No session, no event.** `start.sh` refusing creates nothing, so there is
   nothing to post on; see `start_refused`. A worktree with no session file is
   named in the driver's message instead.
@@ -187,7 +191,9 @@ would have refused. Kind `action`, on the item's session.
 
 The driver removed a worktree whose pull request was merged or closed, whose
 tree was clean and whose head was the pull request's, and deleted its local
-branch. Posted at the session's start or end, when the cleanup runs. Kind
+branch — or saw that its merge removed both. Posted right after the merge when
+`gh pr merge --delete-branch` took the worktree, and otherwise at the session's
+start or end, when the cleanup runs. Kind
 `action`, on the session recorded in that worktree.
 
 | field | |

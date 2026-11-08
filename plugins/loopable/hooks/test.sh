@@ -2485,6 +2485,50 @@ check "a --close stand-in names screenshot_ids, pr_url and an open PR only" none
 # without a word and `status --porcelain` does not show: a `.env` is data.
 check "the cleanup reads the ignored files first" 1 \
   "$(grep -c -- '--ignored' "$AGENTS/driver.md" | sed 's/^[1-9][0-9]*$/1/')"
+# THE MERGE SAVES THE STATE FIRST (376). `gh pr merge --delete-branch` (gh
+# 2.103) removes the item's worktree with its local branch, and <state> goes
+# with it: the session id, the brief's amendments, every round's head. So the
+# merge step, before the line that merges, reads the session, reads the ignored
+# files and copies <state> into the main checkout's git dir — and the two
+# sentences that assumed the worktree outlives the merge are gone.
+MERGE_STEP=$(awk '/^\*\*Merge\*\* only when/ {f = 1} /^\*\*Fix\*\* when/ {f = 0} f' "$AGENTS/driver.md" 2>/dev/null)
+check "the merge step saves the state before it merges" none \
+  "$(for w in '<state>/session' 'status --porcelain --ignored' 'loopable/archive/<ref>'; do
+       printf '%s\n' "$MERGE_STEP" | awk -v w="$w" '
+         index($0, w) && !seen {seen = NR}
+         index($0, "gh pr merge <pr> --") && !m {m = NR}
+         END {exit !(seen && m && seen < m)}' || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
+# The copy is one numbered step, read whole: it names all four and where they go.
+COPY_STEP=$(printf '%s\n' "$MERGE_STEP" |
+  awk '/^ *[0-9]+\. Copy / {f = 1} f && /^ *([0-9]+\.|-) / && !/ Copy / {f = 0} f' | tr '\n' ' ')
+check "and copies brief, rounds, session and item into the archive" none \
+  "$(for w in '<state>/brief.md' '<state>/rounds' '<state>/session' '<state>/item' 'archive'; do
+       printf '%s' "$COPY_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
+# AFTER the merge line, not anywhere in the step (376, round 1): the save step
+# already names worktree_removed ("keep the id"), so a count over the whole step
+# stayed green with the post-merge bullet deleted.
+AFTER_MERGE=$(printf '%s\n' "$MERGE_STEP" | awk 'm; index($0, "gh pr merge <pr> --") {m = 1}')
+check "and posts worktree_removed on the saved id once the tree is gone" none \
+  "$(for w in 'git worktree list' 'post `worktree_removed`' '<archive>/worktree_removed'; do
+       printf '%s\n' "$AFTER_MERGE" | grep -qF -- "$w" || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
+# AND THE CLEANUP KNOWS WHETHER THAT POST HAPPENED: the marker the merge step
+# writes is what it reads, so a later session neither posts twice nor skips it.
+check "the cleanup reads the marker before posting worktree_removed" 1 \
+  "$(awk '/^## Cleaning up/ {f = 1; next} /^## / {f = 0} f' "$AGENTS/driver.md" |
+       grep -cF '<archive>/worktree_removed' | sed 's/^[1-9][0-9]*$/1/')"
+check "the sentences that kept the worktree past the merge are gone" none \
+  "$(for w in 'which its worktree still holds' 'waits for the cleanup at the end'; do
+       grep -qF -- "$w" "$AGENTS/driver.md" 2>/dev/null && printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "the cleanup counts a worktree gh removed as cleaned" 1 \
+  "$(awk '/^## Cleaning up/ {f = 1; next} /^## / {f = 0} f' "$AGENTS/driver.md" |
+       grep -c 'already cleaned' | sed 's/^[1-9][0-9]*$/1/')"
+check "fix rounds and the master builder read the archive once it is gone" none \
+  "$(for f in "$AGENTS/driver.md" "$AGENTS/masterbuilder.md" "$HERE/../skills/loopable/driver-events.md"; do
+       grep -qF 'loopable/archive/<ref>' "$f" 2>/dev/null || printf '%s ' "$(basename "$f")"; done |
+       sed 's/ $//' | grep . || echo none)"
 # THE DRIVER IS PROSE ABOUT SCRIPTS AND AGENTS, and prose does not fail when a
 # script is renamed. Every bin/, commands/ and loopable: name it uses must exist.
 MISSING=$(
