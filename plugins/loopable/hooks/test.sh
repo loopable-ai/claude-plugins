@@ -462,20 +462,44 @@ gf "  printf piped into sh"                       deny "printf 'gh pr merge' | s
 gf "  echo inside a \$( )"                        deny "\$(echo 'gh pr merge')"
 gf "  echo inside backticks"                      deny "\`echo 'gh pr merge --squash'\`"
 gf "  a grep inside a \$( )"                      deny "\$(grep -h 'gh pr merge' cmds.txt)"
-# The gate itself: a leading echo with no pipe, $( or backtick still passes
-# before anything is asked; with a pipe it does not.
+# The gate itself: a leading echo with no $( or backtick still passes before
+# anything is asked; piped into a shell it does not.
 verdict "echo 'gh pr merge 9 later'" >/dev/null
 check "the first-word pass: a plain echo asks nothing"        0 "$(grep -c . "$STUB_GH_CALLS")"
-verdict "echo 'gh pr merge 9 later' | cat" >/dev/null
-check "  an echo with a pipe is read, not passed"             1 "$(grep -c '^pr diff 9 ' "$STUB_GH_CALLS")"
-# THE FAST PATH FAILS CLOSED: any shell metacharacter at all and the command
-# goes to the reader, which is also bug 372 — a first word that cannot run
-# anything followed by a second command that can.
+verdict "echo 'gh pr merge 9 later' | sh" >/dev/null
+check "  an echo piped into sh is read, not passed"           1 "$(grep -c '^pr diff 9 ' "$STUB_GH_CALLS")"
+# THE FIRST-WORD PASS IS PER SIMPLE COMMAND (bug 372). The command is split on
+# ; & | and newlines (&& || |& included), and it passes only when EVERY piece
+# starts with a word that cannot run a program: a harmless first command says
+# nothing about the second. Still at a FAILED head, so a merge the pass let
+# through would read pass where it must read deny.
 gf "  echo into a process substitution"           deny "echo 'gh pr merge' > >(bash)"
 gf "  bug 372: echo ok; then the merge"           deny "echo ok; gh pr merge 9"
 gf "  bug 372: true && then the merge"            deny "true && gh pr merge 9"
+gf "  bug 372: echo ok && then the merge"         deny "echo ok && gh pr merge 9"
+gf "  bug 372: echo ok || then the merge"         deny "echo ok || gh pr merge 9"
+gf "  bug 372: echo ok | then the merge"          deny "echo ok | gh pr merge 9"
+gf "  bug 372: echo ok & then the merge"          deny "echo ok & gh pr merge 9"
+gf "  bug 372: two harmless, then the merge"      deny "echo a; cat b; gh pr merge 9"
+# THE FIRST WORD ENDS AT WHITESPACE (reviewer, fix round 1): `echo=1` is an
+# assignment, not echo, and the merge after it runs with it in its
+# environment. A regex that stopped at `=` read it as echo and passed.
+gf "  an echo= assignment before the merge"       deny "echo=1 gh pr merge 9"
+gf "  echo ok; then an echo= assignment and it"   deny "echo ok; echo=1 gh pr merge 9"
 gf "  a cat, a newline, then the merge"           deny "cat x
 gh pr merge 9"
+# ...and a command in which NO simple command can run anything still passes
+# before a single lookup, however many pieces it has.
+verdict "echo gh pr merge 9" >/dev/null
+check "  bug 372: echo gh pr merge 9 asks nothing"            0 "$(grep -c . "$STUB_GH_CALLS")"
+check "  and passes"                                          pass "$(verdict "echo gh pr merge 9")"
+verdict "echo ok; echo gh pr merge 9" >/dev/null
+check "  bug 372: echo ok; echo gh pr merge 9 asks nothing"   0 "$(grep -c . "$STUB_GH_CALLS")"
+verdict "echo 'gh pr merge 9 later' | cat" >/dev/null
+check "  bug 372: an echo piped to cat asks nothing"          0 "$(grep -c . "$STUB_GH_CALLS")"
+verdict "printf 'gh pr merge 9' && echo done
+tail -1 x" >/dev/null
+check "  bug 372: printf && echo, newline, tail asks nothing" 0 "$(grep -c . "$STUB_GH_CALLS")"
 # ...and ordinary commands that lose the fast path still find no merge.
 quiet "  an echo then an ls, read and quiet"       "echo done; ls -la"
 quiet "  a cat piped to head, read and quiet"      "cat notes.txt | head -5"

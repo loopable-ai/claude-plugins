@@ -229,10 +229,14 @@ them a refusal. Any other command, known or not (`nohup`, `sudo -u`, `find
 `echo` or a `printf` in a command holding any shell metacharacter (`| & ; < >
 ( ) $`, a backtick, a newline: `echo 'gh pr merge' | bash`, `> >(bash)`), an
 `rg` given `--pre` or `--pre-glob` (it runs a program on every file), or any
-mention inside a `$(…)` or backticks. The first-word pass (a leading `echo`,
-`cat`… cannot run anything) fails closed the same way: it is taken only for a
-command with no shell metacharacter at all, so `echo ok; gh pr merge 9` and
-`true && gh pr merge 9` are read (bug 372). What the reader still misses on a
+mention inside a `$(…)` or backticks. The first-word pass (`echo`, `printf`,
+`cat`, `head`, `tail` and `comm` cannot run anything) is read per simple
+command: the command is split on `;`, `&`, `|` and newlines (`&&`, `||` and
+`|&` with them), and it passes before any lookup only when every piece starts
+with one of those words — `echo gh pr merge 9` and `echo ok | cat` do, while
+`echo ok; gh pr merge 9` and `true && gh pr merge 9` are read (bug 372). A
+command holding any of `< > ( ) $` or a backtick takes no fast path at all.
+What the reader still misses on a
 crafted command is filed as bug 373. The repository the command names (`-R`,
 `--repo`, wherever it sits) goes to every `gh pr` lookup the guard makes, when
 it reads as `OWNER/REPO` or `HOST/OWNER/REPO`; a pull request url names its own,

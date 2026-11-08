@@ -174,22 +174,38 @@ printf '%s' "$NORM" | grep -qiE 'merge' || pass
 # asserting membership rather than behaviour, so putting awk back fails on the
 # list itself rather than on somebody remembering to write the exploit.
 #
-# ONLY FOR A COMMAND WITH NO SHELL METACHARACTER AT ALL (security review, fix
-# round 4): `echo 'gh pr merge' | bash`, `$(echo ...)`, `echo ... > >(bash)`
-# hand the text to something that runs it, and `echo ok; gh pr merge 9` or
-# `true && gh pr merge 9` (bug 372) run a second command the first word says
-# nothing about. A list of the dangerous ones missed `>(` the day it was
-# written, so the fast path fails closed instead: any of | & ; < > ( ) $ ` or
-# a newline, and the command goes to the reader like any other.
+# PER SIMPLE COMMAND (bug 372). The pass once read the whole command's first
+# word, so `echo ok; gh pr merge 9` and `true && gh pr merge 9` passed on the
+# strength of a command that ran before the merge. The command is split on
+# ; & | and newlines — which covers && || |& too — and passes only when EVERY
+# piece is empty or starts with a word on the list: `echo ok | cat` cannot run
+# anything, `echo ok | sh` can. A separator inside quotes splits too, which
+# only ever sends a command to the reader, never past it.
+#
+# NOTHING THAT RUNS TEXT OR HIDES A COMMAND (security review, fix round 4):
+# `$(echo ...)`, a backtick and `echo ... > >(bash)` hand text to something
+# that runs it, and a list of those missed `>(` the day it was written. So a
+# command holding any of < > ( ) $ ` takes no fast path at all and goes to the
+# reader like any other.
 CANNOT_EXEC='echo printf cat head tail comm'
-FIRST=$(printf '%s' "$CMD" | sed -nE 's|^[[:space:]]*([A-Za-z0-9_./-]+).*|\1|p' | head -1)
-NL='
-'
+cannot_exec() { # cannot_exec <simple command>: true when it is empty or its first word is listed
+  local first safe
+  case $1 in *[![:space:]]*) ;; *) return 0 ;; esac
+  # The word ends at whitespace or the end of the piece: `echo=1 gh pr merge 9`
+  # is an assignment before a merge, not an echo (reviewer, fix round 1).
+  first=$(printf '%s' "$1" | sed -nE 's|^[[:space:]]*([A-Za-z0-9_./-]+)([[:space:]].*)?$|\1|p' | head -1)
+  for safe in $CANNOT_EXEC; do
+    [ "${first##*/}" = "$safe" ] && return 0
+  done
+  return 1
+}
 case $CMD in
-  *[\|\&\;\<\>\(\)\$\`]*|*"$NL"*) ;;
-  *) for safe in $CANNOT_EXEC; do
-       [ "${FIRST##*/}" = "$safe" ] && pass
-     done ;;
+  *[\<\>\(\)\$\`]*) ;;
+  *) NONE_CAN=1
+     while IFS= read -r piece; do
+       cannot_exec "$piece" || { NONE_CAN=; break; }
+     done < <(printf '%s\n' "$CMD" | tr ';&|' '\n\n\n')
+     [ -n "$NONE_CAN" ] && pass ;;
 esac
 
 # THE PR ARGUMENT, READ THE WAY gh READS IT (363, brief rev 2).
@@ -359,8 +375,8 @@ function merge_arg(s, i,    skip, dd, pend, res) {
 # open a quote that the text never opened.
 #
 # AND A MENTION WHOSE OUTPUT CAN BE RUN IS NOT ONE (security review, fix round
-# 4): an echo or a printf in a command holding any shell metacharacter (the
-# set the first-word pass uses: | & ; < > ( ) $ backtick, newline) may be
+# 4): an echo or a printf in a command holding any shell metacharacter
+# (| & ; < > ( ) $ backtick, newline) may be
 # feeding a shell, and any mention inside a $( or a backtick is output the
 # shell may run. Both are 1.
 function runs_string(t, pos,    i, c, q, qs, cs, sub0, pre, n, k, w, ws, first, sub1, prerun) {
