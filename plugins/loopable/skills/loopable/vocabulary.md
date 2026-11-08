@@ -327,9 +327,12 @@ fault anything is.
 
 The first six are a road and the last three are places to stand. Who may take
 which step is not the same question: a person may take any of them, and an
-agent may report its way to `in_review` and no further — it does not groom
-its own work, it does not decide that a deploy happened, and it does not
-accept what it built. The one exception is a person's own: whoever mints an
+agent may report its way to `in_review` and no further — it does not decide
+that a deploy happened, and it does not accept what it built. It grooms only
+what it filed itself: an agent sets `ready` only on an item it filed itself,
+through the same token, from `todo`, and only once nothing is missing for the
+item to be ready; anything a person or another token filed is groomed by a
+person. The other exception is a person's own: whoever mints an
 agent token may choose, then, to let it set `ready`, `verifying` and `done`
 for them. Those moves are still the person's — the trail names them and the
 token they came through — and the agent makes one only when the person asks
