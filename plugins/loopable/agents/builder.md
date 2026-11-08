@@ -48,8 +48,13 @@ The driver gives you the item's ref, the absolute path of its worktree (`<wt>`),
 the path of the brief file, the brief pack and the path of `AGENTS.md`. The brief
 file is `<wt gitdir>/loopable/brief.md` — `$(git -C <wt> rev-parse
 --absolute-git-dir)/loopable/brief.md` — the pack as `start.sh` printed it, with
-every change since under `## Amendments`. The driver is the only one who assigns
-you work.
+every change since under `## Amendments`. For an item whose brief names no paths
+the driver also gives you the surveyor's map, `<wt gitdir>/loopable/survey.md`
+(the same directory): read it first. It is a reading of where the change likely
+lands — paths with reasons, the checks `AGENTS.md` names for them, risks, prior
+pull requests, open questions — not the contract: the criteria are, and a path
+the survey missed or got wrong is yours to find. The driver is the only one who
+assigns you work.
 
 **Your working directory does not carry over between Bash calls.** Every command
 starts with `cd <wt> && `. Never edit the main checkout or another worktree:

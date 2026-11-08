@@ -7,9 +7,10 @@ for the three keys). From then on six hooks apply, each doing one mechanical
 thing — anything needing judgement is a skill, not a hook — plus two commands,
 which are the two ends of a piece of work (`/loopable:start` begins one,
 `/loopable:ship` finishes it), a planning skill, `/loopable:plan`, that asks
-every question for a batch before any of it is built, and five agents: the
+every question for a batch before any of it is built, and six agents: the
 `verifier` and `reviewer` that ship runs, and the `driver`, `builder` and
-`masterbuilder` that run the commands for you.
+`masterbuilder` that run the commands for you, with the `surveyor` that maps the
+code for an item whose brief names no paths before its builder starts.
 
 | hook | event | |
 |---|---|---|
@@ -564,6 +565,18 @@ pushes and before it reports), and each run's reports copied to
 `<wt gitdir>/loopable/rounds/<n>/` before the next `--prepare` clears them. The
 reviewer reads a fix round's diff first, and earlier code blocks only for a
 security or data-loss defect or a broken criterion.
+
+**It surveys before it builds, when the brief names no paths.** A builder handed
+only criteria starts from a cold repository, so for such an item the driver first
+spawns `surveyor-<ref>`: read tools and Bash, no editor and no backlog tool, which
+reads the pack, the items and decisions around it and the code, and writes
+`<wt gitdir>/loopable/survey.md` in at most 40 lines — what to read first, the
+likely paths each with a reason, the checks `AGENTS.md` names for them, the
+risks, prior pull requests and open questions. The builder is handed its path
+and reads it as a map, never as the contract. Adapted from the surveyor in
+Avanti Studio's fountain plugin; `test.sh` holds its frontmatter, its missing
+editor, its sections, and that the driver spawns it before the builder and
+passes the path on.
 
 **It cleans up after itself.** At the start and end of every session it removes
 every worktree `git worktree list` shows — `.claude/worktrees/`,

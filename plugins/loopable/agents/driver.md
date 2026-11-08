@@ -426,11 +426,23 @@ as a pass — your own merge rule below still decides.
 
 ### 2. Build
 
+**Survey first when the brief names no paths.** Read the brief file: when no
+criterion, no line of the item and no amendment names a path in the repository,
+spawn a `loopable:surveyor` in the background, named `surveyor-<ref>`, with the
+ref, the absolute worktree path, the path of `<state>/brief.md`, the path it
+writes, `<state>/survey.md`, and the path of `AGENTS.md` — nothing else, as for
+the builder. Wait for its three-line report before the builder starts: it is the
+map the builder starts from. Its open questions are questions like any other: one
+only the person can answer is asked once, in one line (in a planned batch it parks
+the item, as above); the rest are the builder's to settle from the survey. A brief
+that names a path gets no survey.
+
 Spawn a `loopable:builder` in the background, named `builder-<ref>`, with the
 ref, the absolute worktree path, the path of `<state>/brief.md`, the pack exactly
-as `start.sh` printed it, and the path of `AGENTS.md`. Nothing else: do not design
-the change for it, and do not paraphrase the criteria. Post `builder_started` on
-the item's session.
+as `start.sh` printed it, the path of `AGENTS.md`, and, when the surveyor wrote
+one, the path of `<state>/survey.md`. Nothing else: do not design the change for
+it, do not paraphrase the criteria, and do not summarise the survey. Post
+`builder_started` on the item's session.
 
 Then wait. Its report arrives by itself. Never sleep, poll or watch anything in
 the foreground; a command started with `run_in_background` notifies you when it
@@ -499,7 +511,7 @@ required ones — and nothing in the hand-over list sends it to the person.
      else — a `.env`, local fixtures, a database dump, an untracked file — holds
      the merge: name it to the person, with the path, and wait for their word.
   3. Copy `<state>/brief.md`, `<state>/rounds/`, `<state>/session` and
-     `<state>/item` into `<archive>` (`loopable/archive/<ref>/` in `<main>`'s
+     `<state>/item` — and `<state>/survey.md` when there is one — into `<archive>` (`loopable/archive/<ref>/` in `<main>`'s
      git dir): `mkdir -p <archive>`, then `cp -R` each one there. It survives
      the worktree's removal and, being under `.git`, cannot be committed.
 - Merge with the repository's method and **nothing else on the line**:

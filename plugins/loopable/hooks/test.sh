@@ -2462,14 +2462,15 @@ AGENTS="$HERE/../agents"
 # The frontmatter alone: the lines between the first two `---`.
 fm() { awk 'NR == 1 && $0 == "---" {f = 1; next} f && $0 == "---" {exit} f' "$1"; }
 tools_of() { fm "$1" | sed -n 's/^tools: //p' | tr ',' '\n' | tr -d ' '; }
-for a in driver builder masterbuilder verifier reviewer; do
+for a in driver builder masterbuilder verifier reviewer surveyor; do
   check "agents/$a.md is named $a"  "$a" "$(fm "$AGENTS/$a.md" 2>/dev/null | sed -n 's/^name: //p')"
   check "and says when to use it"   1    "$(fm "$AGENTS/$a.md" 2>/dev/null | grep -c '^description: ')"
 done
 # NO EDITOR, AND THAT IS STRUCTURAL: naming a gap and patching it are two jobs.
 # A missing `tools:` line means every tool, editors included, so it is a
-# failure of its own rather than an empty list that passes.
-for a in verifier reviewer; do
+# failure of its own rather than an empty list that passes. The surveyor (367)
+# is a reader too: a map drawn by a hand with a stake in the change is shaded.
+for a in verifier reviewer surveyor; do
   T=$(tools_of "$AGENTS/$a.md")
   check "the $a lists its tools"     yes  "$([ -n "$T" ] && echo yes || echo no)"
   check "and no editor is among them" none \
@@ -2497,6 +2498,35 @@ check "the master builder lists its tools" yes "$([ -n "$M" ] && echo yes || ech
 check "and they are the builder's, exactly" same \
   "$([ -n "$M" ] && [ "$(printf '%s\n' "$M" | sort)" = "$(printf '%s\n' "$T" | sort)" ] && echo same || echo "$M" | tr '\n' ' ')"
 check "and it runs on opus" opus "$(fm "$AGENTS/masterbuilder.md" 2>/dev/null | sed -n 's/^model: //p')"
+# THE SURVEYOR MAPS, AND ONLY MAPS (367). It reads the pack, the neighbourhood
+# and the code and writes one file, <state>/survey.md, of at most 40 lines; it
+# has no backlog tool and spawns nobody, so the map is the whole of what it does.
+S=$(tools_of "$AGENTS/surveyor.md")
+check "the surveyor has no backlog and no agents" none \
+  "$(printf '%s\n' "$S" | grep -E '^(mcp__|Agent$|Task$|SendMessage$)' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "and writes <state>/survey.md, at most 40 lines, counted" none \
+  "$(for w in 'loopable/survey.md' 'at most 40 lines' 'wc -l'; do
+       grep -qF -- "$w" "$AGENTS/surveyor.md" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "with the six sections the driver and the builder read" none \
+  "$(for h in 'Read first' 'Likely paths' 'Checks' 'Risks' 'Prior PRs' 'Open questions'; do
+       grep -qx "## $h" "$AGENTS/surveyor.md" 2>/dev/null || printf '[%s] ' "$h"; done | sed 's/ $//' | grep . || echo none)"
+# THE DRIVER SURVEYS FIRST, for an item whose brief names no paths: in its
+# Build step the surveyor is spawned before the builder, and the builder's
+# spawn passes the survey's path, which the builder reads. A survey nobody is
+# handed is a map nobody reads.
+BUILD_STEP=$(awk '/^### 2\. Build/ {f = 1} /^### 3\. Ship/ {f = 0} f' "$AGENTS/driver.md" 2>/dev/null)
+check "the driver spawns the surveyor before the builder" yes \
+  "$(printf '%s\n' "$BUILD_STEP" | awk '
+       index($0, "`loopable:surveyor`") && !s {s = NR}
+       index($0, "`loopable:builder`") && !b {b = NR}
+       END {print (s && b && s < b) ? "yes" : "no"}')"
+check "for an item whose brief names no paths" 1 \
+  "$(printf '%s\n' "$BUILD_STEP" | grep -c 'names no paths' | sed 's/^[1-9][0-9]*$/1/')"
+check "and hands the builder the survey's path" 1 \
+  "$(printf '%s\n' "$BUILD_STEP" | awk 'BEGIN {RS = ""} index($0, "Spawn a `loopable:builder`")' |
+       grep -cF '<state>/survey.md' | sed 's/^[1-9][0-9]*$/1/')"
+check "which the builder reads" 1 \
+  "$(grep -cF 'loopable/survey.md' "$AGENTS/builder.md" 2>/dev/null | sed 's/^[1-9][0-9]*$/1/')"
 # THE BRIEF FILE IS ONE PATH IN THREE PROMPTS (361). The driver writes the pack
 # and every round's amendment to <state>/brief.md; the builder and the master
 # builder re-read it before they push and before they report, because a message
