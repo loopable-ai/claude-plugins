@@ -642,3 +642,14 @@ against a throwaway git repository it creates — no network, no token, no state
 from this checkout. Half the cases assert a PASS, which is the half worth
 having. Its last line is the count of cases it ran — read the count, not the
 colour.
+
+The hooks are not the whole plugin: the agents are prose, and prose does not
+fail a test when it stops saying what it should. `plugin/evals/` tests the
+**driver** the way it is used — as the main session, in a real repository with a
+local origin, against a stateful `gh` and a stateful backlog — through nine cases
+taken from incidents: a start that breaks, a pull request the builder opened by
+hand, a cleanup after merges, the person asking for two things, a fail at the
+head, a head that moved, the steps after a merge, rounds that escalate and rounds
+that widen. Its offline self-test (`python3 -B plugin/evals/test-fixtures.py`)
+runs in `guards` on every PR; the paid model trials run only by hand.
+`plugin/evals/README.md` says how, and what they cost.

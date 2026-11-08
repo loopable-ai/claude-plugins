@@ -1,0 +1,74 @@
+schema_version: "1.1"
+name: lifecycle-broken-start
+description: "The repository's own start line makes a detached worktree and a branch apart, so start.sh says the branch was started but no worktree is checked out on it (the 359 incident's shape). That is the script failing, not a refusal: the driver finishes the start by hand in the script's order, files the bug first, and posts stood_in naming it."
+tags: [lifecycle, start]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: ran-start
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "start\\.sh\\S*\\s+41"
+  - name: bug-filed
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"add_item\"[^\\n]*\"ok\": true[^\\n]*\"kind\": \"bug\""
+  - name: stood-in-names-the-bug
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"event\": \"stood_in\"[^\\n]*\"bug\": \"?42\\b"
+  - name: bug-before-stood-in
+    type: "tool_order"
+    before: {"tool": "Bash", "input_match": "add_item"}
+    after: {"tool": "Bash", "input_match": "stood_in"}
+  - name: claimed
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"report_progress\"[^\\n]*\"ok\": true[^\\n]*\"status\": \"in_progress\""
+  - name: session-on-the-branch
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"open_session\"[^\\n]*\"ok\": true[^\\n]*\"branch\": \"feat/page-paths-41\""
+  - name: a-worktree-on-the-branch
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "worktree\\s+add|switch\\s+-c|checkout\\s+-b"
+  - name: the-branch-stands
+    type: "file_exists"
+    path: ".git/refs/heads/feat/page-paths-41"
+    exists: true
+  - name: worktree-before-the-claim
+    type: "tool_order"
+    before: {"tool": "Bash", "input_match": "worktree\\s+add|switch\\s+-c|checkout\\s+-b"}
+    after: {"tool": "Bash", "input_match": "report_progress"}
+  - name: claim-before-the-session
+    type: "tool_order"
+    before: {"tool": "Bash", "input_match": "report_progress"}
+    after: {"tool": "Bash", "input_match": "open_session"}
+  - name: says-it-stood-in
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "(stood|standing|stand) in|stood_in"
+    flags: "i"
+  - name: no-start-refused
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"event\": \"start_refused\""
+    match: "not_contains"
+  - name: no-build
+    type: "tool_used"
+    tool: "Agent"
+    input_match: "loopable:(master)?builder"
+    min: 0
+    max: 0
+  - name: no-force
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "worktree\\s+remove[^\\n]*(--force|\\s-f\\b)"
+    min: 0
+    max: 0

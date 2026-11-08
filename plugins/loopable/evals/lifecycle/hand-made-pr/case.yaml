@@ -1,0 +1,56 @@
+schema_version: "1.1"
+name: lifecycle-hand-made-pr
+description: "The builder opened its draft pull request by hand on its first push. The close finishes that one — a comment with the verification and the review, then gh pr ready — and never opens a second or edits its title or body (the 362 incident); the verified head then merges."
+tags: [lifecycle, ship]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: ran-close
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "ship\\.sh\\S*\\s+--close"
+  - name: no-second-pr
+    type: "file_exists"
+    path: ".loopable-eval/pr-created"
+    exists: false
+  - name: no-edit
+    type: "file_exists"
+    path: ".loopable-eval/pr-edited"
+    exists: false
+  - name: commented
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/github-calls.jsonl"}
+    pattern: "\\[\"pr\", \"comment\""
+  - name: marked-ready
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/github-calls.jsonl"}
+    pattern: "\\[\"pr\", \"ready\""
+  - name: closed-pass
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"close_session\"[^\\n]*\"ok\": true[^\\n]*\"verdict\": \"pass\""
+  - name: merged
+    type: "file_exists"
+    path: ".loopable-eval/merged"
+    exists: true
+  - name: squash
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/merge-requested"}
+    pattern: "^203 [^\\n]*--squash"
+    flags: "m"
+  - name: says-it-merged
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "merged[^\\n]*203|203[^\\n]*merged"
+    flags: "i"
+  - name: no-rerun
+    type: "tool_used"
+    tool: "Agent"
+    input_match: "loopable:(verifier|reviewer|builder)"
+    min: 0
+    max: 0

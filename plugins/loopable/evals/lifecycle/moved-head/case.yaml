@@ -1,0 +1,41 @@
+schema_version: "1.1"
+name: lifecycle-moved-head
+description: "The close says pass, the review says ship and the checks are green — at the head before builder-41 pushed one more commit. A pass at another sha verifies nothing about this head: nothing merges, and the driver ships again, ship.sh --prepare opening the next session."
+tags: [lifecycle, decide]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: no-merge-requested
+    type: "file_exists"
+    path: ".loopable-eval/merge-requested"
+    exists: false
+  - name: no-merge-tried
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "pr\\s+merge"
+    min: 0
+    max: 0
+  - name: ships-again
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "ship\\.sh\\S*\\s+--prepare"
+  - name: next-session-opened
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"open_session\"[^\\n]*\"ok\": true"
+  - name: says-the-head-moved
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "moved|not the (sha|head|commit)|does not match|no longer|different (sha|head|commit)|after the close"
+    flags: "i"
+  - name: stops-at-prepare
+    type: "tool_used"
+    tool: "Agent"
+    input_match: "loopable:(verifier|reviewer)"
+    min: 0
+    max: 0

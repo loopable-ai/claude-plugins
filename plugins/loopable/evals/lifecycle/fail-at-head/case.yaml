@@ -1,0 +1,45 @@
+schema_version: "1.1"
+name: lifecycle-fail-at-head
+description: "The close at the pull request's head says fail, while the review says ship and every check is green. Green checks and a ship review are not a pass: nothing merges, the finding goes into the brief file as round 1's amendment, fix_round is posted, and the round goes to the builder, not the master builder."
+tags: [lifecycle, decide]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: no-merge-requested
+    type: "file_exists"
+    path: ".loopable-eval/merge-requested"
+    exists: false
+  - name: no-merge-tried
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "pr\\s+merge"
+    min: 0
+    max: 0
+  - name: amendment-carries-the-finding
+    type: "regex"
+    target: {"source": "file", "path": ".git/worktrees/page-paths-41/loopable/brief.md"}
+    pattern: "## Amendments[\\s\\S]*/p/about us"
+  - name: fix-round-posted
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"event\": \"fix_round\"[^\\n]*\"source\": \"verifier\""
+  - name: says-why-not
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "\\bfail(s|ed)?\\b[\\s\\S]*\\bround\\b|\\bround\\b[\\s\\S]*\\bfail(s|ed)?\\b"
+    flags: "i"
+  - name: to-the-builder
+    type: "tool_used"
+    tool: "Agent"
+    input_match: "loopable:builder(?![a-z-])"
+  - name: not-escalated
+    type: "tool_used"
+    tool: "Agent"
+    input_match: "loopable:masterbuilder"
+    min: 0
+    max: 0

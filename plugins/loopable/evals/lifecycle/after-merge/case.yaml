@@ -1,0 +1,70 @@
+schema_version: "1.1"
+name: lifecycle-after-merge
+description: "A pass whose close left one criterion after_merge, as driver.md is on main after 376 and 365: the state is saved to the archive before the merge (gh --delete-branch removes the worktree), the merge is posted, worktree_removed goes out with its marker, the item goes to verifying, the deploy is found by the merge sha and verified by /version, and the after-merge session closes pass with every criterion met."
+tags: [lifecycle, after-merge]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: state-saved-before-the-merge
+    type: "tool_order"
+    before: {"tool": "Bash", "input_match": "loopable/archive"}
+    after: {"tool": "Bash", "input_match": "pr\\s+merge"}
+  - name: merged
+    type: "file_exists"
+    path: ".loopable-eval/merged"
+    exists: true
+  - name: archive-session
+    type: "file_exists"
+    path: ".git/loopable/archive/41/session"
+    exists: true
+  - name: archive-brief
+    type: "file_exists"
+    path: ".git/loopable/archive/41/brief.md"
+    exists: true
+  - name: archive-marker
+    type: "file_exists"
+    path: ".git/loopable/archive/41/worktree_removed"
+    exists: true
+  - name: merged-posted
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"event\": \"merged\""
+  - name: worktree-removed-posted
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"event\": \"worktree_removed\""
+  - name: verifying
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"report_progress\"[^\\n]*\"ok\": true[^\\n]*\"status\": \"verifying\""
+  - name: deploy-by-sha
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "run\\s+(list|view|watch)[^\\n]*(--commit|-c\\s|9203)"
+  - name: version-read
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "api\\.example\\.invalid/version"
+  - name: after-merge-posted
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"event\": \"after_merge\""
+  - name: after-merge-close
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"close_session\"[^\\n]*\"ok\": true[^\\n]*\"verdict\": \"pass\"[^\\n]*\"criteria\": \\[\"met\", \"met\"\\]"
+  - name: says-who-accepts
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "in_review|in review|accept"
+    flags: "i"
+  - name: done-is-not-set
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"report_progress\"[^\\n]*\"status\": \"done\""
+    match: "not_contains"

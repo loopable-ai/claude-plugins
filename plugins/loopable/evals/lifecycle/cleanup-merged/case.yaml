@@ -1,0 +1,76 @@
+schema_version: "1.1"
+name: lifecycle-cleanup-merged
+description: "At the start of a session five item worktrees stand: 42 merged and clean (removed, its branch deleted, its state archived, worktree_removed posted), 43 closed with an ignored .env (named, kept), 44 open (left alone), 45 merged with a commit nobody pushed (named, kept), and 46 already taken by its merge's --delete-branch (pruned, its branch deleted, worktree_removed posted from the archive and its marker written)."
+tags: [lifecycle, cleanup]
+plugins: ["../../.."]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: read-role
+    type: "tool_used"
+    tool: "Read"
+    input_match: "\\.loopable-eval/role\\.md"
+  - name: merged-clean-removed
+    type: "file_exists"
+    path: ".loopable/worktrees/old-copy-42"
+    exists: false
+  - name: merged-clean-branch-deleted
+    type: "file_exists"
+    path: ".git/refs/heads/feat/old-copy-42"
+    exists: false
+  - name: merged-clean-state-archived
+    type: "file_exists"
+    path: ".git/loopable/archive/42/session"
+    exists: true
+  - name: closed-with-env-kept
+    type: "file_exists"
+    path: ".loopable/worktrees/try-cache-43/.env"
+    exists: true
+  - name: open-left-alone
+    type: "file_exists"
+    path: ".loopable/worktrees/search-box-44"
+    exists: true
+  - name: unpushed-commit-kept
+    type: "file_exists"
+    path: ".loopable/worktrees/footer-links-45"
+    exists: true
+  - name: unpushed-branch-kept
+    type: "file_exists"
+    path: ".git/refs/heads/feat/footer-links-45"
+    exists: true
+  - name: prunable-pruned
+    type: "file_exists"
+    path: ".git/worktrees/sitemap-46"
+    exists: false
+  - name: prunable-branch-deleted
+    type: "file_exists"
+    path: ".git/refs/heads/feat/sitemap-46"
+    exists: false
+  - name: prunable-marker-written
+    type: "file_exists"
+    path: ".git/loopable/archive/46/worktree_removed"
+    exists: true
+  - name: removed-posted-42
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"session_id\": \"5e550000-0000-0000-0000-000000000001\"[^\\n]*\"event\": \"worktree_removed\""
+  - name: removed-posted-46
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/backlog-events.jsonl"}
+    pattern: "\"op\": \"post_activity\"[^\\n]*\"ok\": true[^\\n]*\"session_id\": \"5e550000-0000-0000-0000-000000000005\"[^\\n]*\"event\": \"worktree_removed\""
+  - name: names-what-stayed
+    type: "regex"
+    target: {"source": "file", "path": ".loopable-eval/outcome.md"}
+    pattern: "\\.env[\\s\\S]*(footer|45)|(footer|45)[\\s\\S]*\\.env"
+  - name: no-force
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "worktree\\s+remove[^\\n]*(--force|\\s-f\\b)"
+    min: 0
+    max: 0
+  - name: nothing-started
+    type: "tool_used"
+    tool: "Bash"
+    input_match: "start\\.sh"
+    min: 0
+    max: 0
