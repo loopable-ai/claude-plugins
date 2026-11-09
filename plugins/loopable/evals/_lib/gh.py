@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent          # <workspace>/.loopable-eval
 STATE = ROOT / 'github.json'
 CALLS = ROOT / 'github-calls.jsonl'
-JSON_FIELDS = ('number', 'url', 'title', 'body', 'state', 'isDraft', 'headRefName', 'headRefOid',
+JSON_FIELDS = ('number', 'url', 'title', 'body', 'state', 'isDraft', 'isCrossRepository', 'headRefName', 'headRefOid',
                'baseRefName', 'mergeable', 'mergeStateStatus', 'reviewDecision', 'comments',
                'mergeCommit', 'mergedAt', 'closedAt', 'statusCheckRollup', 'autoMergeRequest', 'author')
 
@@ -133,7 +133,10 @@ def rollup(state, pr):
 
 
 def view(state, pr):
-    return {**pr, 'statusCheckRollup': rollup(state, pr)}
+    # Every pull request here is opened in the stand-in's one repository, so
+    # none is from a fork unless a fixture says so — and ship.sh takes only a
+    # same-repository one as the branch's own (370).
+    return {'isCrossRepository': False, **pr, 'statusCheckRollup': rollup(state, pr)}
 
 
 def origin_dir():

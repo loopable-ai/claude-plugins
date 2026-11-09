@@ -588,9 +588,25 @@ COMMENT="$STATE/pr-comment.md"
 # as well. So the run ADDS to it: one comment carrying the verification and the
 # review, then `gh pr ready`. Neither is fatal; what failed is said, with the
 # command that finishes it, and the run exits non-zero at the end.
+#
+# ONLY AN OPEN ONE IS THE BUILDER'S (370). `gh pr view` on a branch answers
+# with any pull request the branch ever was, merged or closed included — and a
+# builder pushing again on a merged branch's name made --close replace the
+# description of the merged #85 and close with its url. So the lookup asks for
+# this branch's OPEN pull requests by name; with none, the run opens one, and
+# the close records that url.
+#
+# AND ONLY ONE FROM THIS REPOSITORY, AT THIS HEAD. `--head` matches a branch
+# NAME, and a fork's branch can carry the same one: its open pull request would
+# be commented on, readied and recorded as this close's. So the list is
+# filtered to `isCrossRepository` false and `headRefOid` equal to the HEAD this
+# close verified; anything else is not this branch's, and one is opened.
 PR_UNFINISHED=""
 if [ -z "$PR_TROUBLE" ]; then
-  PR_URL=$(gh pr view --json url -q .url 2>/dev/null) || PR_URL=""
+  PR_URL=$(gh pr list --head "$BRANCH" --state open --json url,isCrossRepository,headRefOid 2>/dev/null |
+    jq -r --arg h "$HEAD_SHA" \
+      '[.[] | select(.isCrossRepository == false and ((.headRefOid // "") | ascii_downcase) == $h)][0].url // empty' \
+      2>/dev/null) || PR_URL=""
   if [ -n "$PR_URL" ]; then
     if gh pr comment "$PR_URL" --body-file "$COMMENT" > "$STATE/pr-out" 2>&1; then
       say "Commented on $PR_URL with the verification and the review"

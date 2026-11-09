@@ -47,11 +47,50 @@ case "$*" in
     [ -n "${STUB_GH_CALLS:-}" ] && printf 'cwd %s\n' "$PWD" >> "$STUB_GH_CALLS"
     [ -s "${STUB_PR_NUMBER:-/dev/null}" ] || exit 1
     jq -nc --argjson n "$(cat "$STUB_PR_NUMBER")" '{number: $n}' ;;
-  # S2.5. `gh pr view --json url` asks whether one exists yet; the fixture
-  # decides, because both answers are paths ship.sh takes.
+  # `gh pr view --json url` on a branch answers with a pull request the branch
+  # WAS, merged or closed included — which is how ship.sh once edited a merged
+  # PR (370). The open one when there is one, else the newest gone one, the way
+  # gh does; nothing in ship.sh asks this any more, so only a regression does.
   *"pr view"*"--json url"*)
-    [ -s "${STUB_PR_URL:-/dev/null}" ] || exit 1
-    cat "$STUB_PR_URL" ;;
+    if [ -s "${STUB_PR_URL:-/dev/null}" ]; then cat "$STUB_PR_URL"
+    elif [ -s "${STUB_PR_GONE:-/dev/null}" ]; then tail -1 "$STUB_PR_GONE" | cut -f1
+    else exit 1; fi ;;
+  # WHICH PULL REQUEST IS THIS BRANCH'S (370): `gh pr list --head <branch>
+  # --state <s>`. STUB_PR_URL is the branch's OPEN one, STUB_PR_GONE holds
+  # `url<TAB>MERGED|CLOSED` lines it was before, and another branch's open PR
+  # is always in the repository — so a list that forgets --head, or a state
+  # filter that is not `open`, finds a pull request that is not this one's.
+  # The branch is read from the directory gh runs in, as gh reads it.
+  # `--head` matches a branch NAME, and a fork's branch can carry the same one
+  # (370, amendment 1): STUB_PR_FORK holds `url<TAB>true|false<TAB>sha|HEAD`
+  # lines — open, on this branch's name, isCrossRepository and headRefOid as
+  # given — listed FIRST, so a lookup that takes `.[0]` on the name takes it.
+  *"pr list"*)
+    head="" state=open q=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --head|-H) head=$2; shift ;;
+        --state|-s) state=$2; shift ;;
+        --jq|-q) q=$2; shift ;;
+      esac
+      shift
+    done
+    here=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+    sha=$(git rev-parse HEAD 2>/dev/null)
+    rows=$( {
+      [ -s "${STUB_PR_FORK:-/dev/null}" ] && awk -F'\t' -v b="$here" -v s="$sha" -v OFS='\t' \
+        '{print $1, "OPEN", b, $2, ($3 == "HEAD" ? s : $3)}' "$STUB_PR_FORK"
+      printf 'https://github.com/wearewebera/sanfrancisco/pull/702\tOPEN\tfeat/someone-else\tfalse\t%s\n' "$sha"
+      [ -s "${STUB_PR_URL:-/dev/null}" ] && printf '%s\tOPEN\t%s\tfalse\t%s\n' "$(head -1 "$STUB_PR_URL")" "$here" "$sha"
+      [ -s "${STUB_PR_GONE:-/dev/null}" ] && awk -v b="$here" -v s="$sha" '{print $0 "\t" b "\tfalse\t" s}' "$STUB_PR_GONE"
+    } | jq -Rsc --arg h "$head" --arg s "$state" '
+      [split("\n")[] | select(. != "") | split("\t") |
+       {url: .[0], state: .[1], headRefName: .[2],
+        isCrossRepository: (.[3] == "true"), headRefOid: .[4]}] |
+      map(select($h == "" or .headRefName == $h)) |
+      map(select($s == "all" or (.state | ascii_downcase) == $s))')
+    if [ -n "$q" ]; then printf '%s' "$rows" | jq -r "$q"; else printf '%s\n' "$rows"; fi
+    exit 0 ;;
   # A `pr create` that FAILS is a path of its own since 256: the close happens
   # anyway, naming no url. The fixture decides, because the host may or may
   # not have a real gh and neither answer may be borrowed from it.
@@ -72,8 +111,9 @@ case "$*" in
     # Recorded into the same log curl writes, so a case can assert that the
     # pull request was opened BEFORE the close and not merely that both
     # happened — which since S1.3+256 is the whole point of the order. The
-    # verb rides along, because which ones ran is the point of 362.
-    [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr %s\t\n' "$2" >> "$STUB_CALLS"
+    # verb rides along, because which ones ran is the point of 362, and so
+    # does the pull request it was run on, because which one is 370's.
+    [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr %s\t%s\n' "$2" "$3" >> "$STUB_CALLS"
     case $2 in
       create|edit) printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
       comment) printf 'https://github.com/wearewebera/sanfrancisco/pull/700#issuecomment-1\n' ;;
@@ -181,12 +221,12 @@ export STUB_HEAD_REF="$STUB/headref" STUB_PR_NUMBER="$STUB/prnumber" STUB_ACTIVI
 printf 'feat/the-branch-9' > "$STUB_HEAD_REF"; : > "$STUB_PR_NUMBER"
 export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
 export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
-export STUB_PR_COMMENT="$STUB/prcomment" STUB_GH_REFUSE=
+export STUB_PR_COMMENT="$STUB/prcomment" STUB_GH_REFUSE= STUB_PR_GONE="$STUB/prgone" STUB_PR_FORK="$STUB/prfork"
 export STUB_ATT_N="$STUB/attn" STUB_CLOSE_ERR="$STUB/closeerr"
 export STUB_OPEN_ERR="$STUB/openerr" STUB_SESSION="$STUB/session"
 export STUB_CLOSE_CODE= STUB_OPEN_CODE= STUB_SESSION_CODE=
 printf '{"session":{"id":"s-1","state":"active","closed_at":null}}' > "$STUB_SESSION"
-: > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"
+: > "$STUB_PR_URL"; : > "$STUB_PR_SENT"; : > "$STUB_CLOSE_ERR"; : > "$STUB_OPEN_ERR"; : > "$STUB_PR_GONE"; : > "$STUB_PR_FORK"
 : > "$STUB_PR_COMMENT"
 : > "$STUB_PR_FAIL"
 printf '0' > "$STUB_ATT_N"
@@ -2373,6 +2413,83 @@ check "a refused ready — exits non-zero" 1 "$RC"
 check "and says the command that finishes it" 1 "$(shipped | grep -c "gh pr ready $EXISTING")"
 check "never falling back to an edit"  0 "$(gh_ran edit)"
 : > "$STUB_PR_URL"
+
+echo
+echo " a branch whose only pull request is merged or closed — a new one is opened (370):"
+# 2026-11-07: fix/start-line-359 had been #85, merged; the builder pushed again
+# on the same name, and `gh pr view --json url` handed --close the MERGED #85,
+# whose description it then replaced. Only an OPEN pull request for the branch
+# is this close's; with none, it opens one and the close records THAT url.
+GONE=https://github.com/wearewebera/sanfrancisco/pull/85
+gh_on() { awk -F'\t' -v u="$1" '$1 == "GH" && $3 == u' "$STUB_CALLS" | grep -c .; }
+for was in MERGED CLOSED; do
+  report pass met met
+  printf '%s\t%s\n' "$GONE" "$was" > "$STUB_PR_GONE"
+  : > "$STUB_GH_CALLS"
+  run_ship --close
+  check "only a $was PR — exits 0"       0 "$RC"
+  check "  it is not commented on, edited nor readied" "0 0 0" \
+    "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
+  check "  no gh write touches it at all" 0 "$(gh_on "$GONE")"
+  check "  a new pull request is opened" 1 "$(gh_ran create)"
+  check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
+    "$(closed_payload | jq -r '.pr_url')"
+  check "  asked for the branch's OPEN pull requests" 1 \
+    "$(grep -c '^pr list --head feat/loopable-ship-99 --state open ' "$STUB_GH_CALLS")"
+done
+: > "$STUB_PR_GONE"
+
+# AN OPEN ONE BESIDE A MERGED ONE: the open one is the builder's draft, and it
+# is the one commented on and readied — the merged one is history.
+report pass met met
+printf '%s\tMERGED\n' "$GONE" > "$STUB_PR_GONE"
+printf '%s\n' "$EXISTING" > "$STUB_PR_URL"
+: > "$STUB_GH_CALLS"
+run_ship --close
+check "an open PR beside a merged one — exits 0" 0 "$RC"
+check "  the open one is commented on"  1 "$(awk -F'\t' -v u="$EXISTING" '$2 == "pr comment" && $3 == u' "$STUB_CALLS" | grep -c .)"
+check "  and readied"                   1 "$(awk -F'\t' -v u="$EXISTING" '$2 == "pr ready" && $3 == u' "$STUB_CALLS" | grep -c .)"
+check "  the merged one is never touched" 0 "$(gh_on "$GONE")"
+check "  nor another branch's open one" 0 "$(gh_on https://github.com/wearewebera/sanfrancisco/pull/702)"
+check "  nothing is created"            0 "$(gh_ran create)"
+check "  the close carries the open one's url" "$EXISTING" "$(closed_payload | jq -r '.pr_url')"
+check "  found with gh pr list --head <branch> --state open" 1 \
+  "$(grep -c '^pr list --head feat/loopable-ship-99 --state open ' "$STUB_GH_CALLS")"
+: > "$STUB_PR_GONE"; : > "$STUB_PR_URL"
+
+# A FORK'S BRANCH CAN HAVE THIS BRANCH'S NAME (370, amendment 1): `--head`
+# matches the name alone, so an open pull request from a fork is listed — first,
+# here — and is not this branch's. Only a same-repository one at this HEAD is.
+FORK=https://github.com/wearewebera/sanfrancisco/pull/703
+report pass met met
+printf '%s\ttrue\tHEAD\n' "$FORK" > "$STUB_PR_FORK"
+run_ship --close
+check "only a fork's open PR on this name — exits 0" 0 "$RC"
+check "  it is not commented on, edited nor readied" "0 0 0" \
+  "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
+check "  no gh write touches it at all" 0 "$(gh_on "$FORK")"
+check "  a new pull request is opened"  1 "$(gh_ran create)"
+check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
+  "$(closed_payload | jq -r '.pr_url')"
+report pass met met
+printf '%s\n' "$EXISTING" > "$STUB_PR_URL"
+run_ship --close
+check "a fork's PR listed before this branch's own — exits 0" 0 "$RC"
+check "  this branch's own is commented on" 1 "$(awk -F'\t' -v u="$EXISTING" '$2 == "pr comment" && $3 == u' "$STUB_CALLS" | grep -c .)"
+check "  and readied"                   1 "$(awk -F'\t' -v u="$EXISTING" '$2 == "pr ready" && $3 == u' "$STUB_CALLS" | grep -c .)"
+check "  the fork's is never touched"   0 "$(gh_on "$FORK")"
+check "  the close carries this branch's url" "$EXISTING" "$(closed_payload | jq -r '.pr_url')"
+: > "$STUB_PR_URL"
+# THE SAME REPOSITORY, BUT NOT THIS HEAD: a pull request whose head is another
+# commit is not the one this close verified.
+report pass met met
+printf '%s\tfalse\t%s\n' "$FORK" 0123456789abcdef0123456789abcdef01234567 > "$STUB_PR_FORK"
+run_ship --close
+check "an open PR on this name at another sha — not taken" "0 0 1" \
+  "$(gh_ran comment) $(gh_ran ready) $(gh_ran create)"
+check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
+  "$(closed_payload | jq -r '.pr_url')"
+: > "$STUB_PR_FORK"
 
 echo
 echo " a fail is still the truth, and still closes:"
