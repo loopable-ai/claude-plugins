@@ -1919,6 +1919,24 @@ check "started from a linked worktree — exits 0" 0 "$RC"
 check "the worktree is under the main checkout's .loopable/" \
   "$SRTP/.loopable/worktrees/bug-pick-me-${OPEN%%-*}" "$(wt_at "bug/pick-me-${OPEN%%-*}")"
 check "and nothing under the linked one"         0 "$([ -e "$SIDE/.loopable" ] && echo 1 || echo 0)"
+# AND SO DOES A start: LINE WITH A RELATIVE PATH (371) — this repository's is.
+# Run where start.sh was invoked, it made the worktree under the linked one.
+printf 'project: p-1\npaths:\n  - apps/loopable\nstart: %s\n' \
+  "git worktree add .loopable/worktrees/rel-<slug> origin/main -b <type>/rel-<slug>" > "$SIDE/.loopable.yaml"
+RUN_IN="$SIDE" run_start "$READY" >/dev/null
+check "a relative start: line from a linked worktree — exits 0" 0 "$RC"
+check "its worktree is under the main checkout's .loopable/" \
+  "$SRTP/.loopable/worktrees/rel-the-start-command-41" "$(wt_at feat/rel-the-start-command-41)"
+check "and still nothing under the linked one"   0 "$([ -e "$SIDE/.loopable" ] && echo 1 || echo 0)"
+# Failing there, what it made is found by its path word, read from the same
+# place it ran: a detached worktree has no branch to know it by.
+printf 'project: p-1\npaths:\n  - apps/loopable\nstart: %s\n' \
+  "git worktree add --detach .loopable/worktrees/reldet-<slug> origin/main && false -b <type>/reldet-<slug>" > "$SIDE/.loopable.yaml"
+BEFORE=$(worktrees)
+RUN_IN="$SIDE" run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a relative line failing from a linked worktree — exits non-zero" 1 "$RC"
+check "the detached worktree it made is removed" "$BEFORE" "$(worktrees)"
+check "and it says so"                           1 "$(printf '%s\n' "$OUT" | grep -c '^Removed the worktree ')"
 start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
 
 echo

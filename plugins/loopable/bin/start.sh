@@ -295,7 +295,7 @@ exclude_loopable
 
 # THE DEFAULT WORKTREE'S PLACE, under the MAIN checkout — the first one git
 # lists — even when this runs from inside a linked worktree: a worktree nested
-# in another goes the day that one is removed.
+# in another goes the day that one is removed. A start: line runs there too.
 MAIN=$(git -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 [ -n "$MAIN" ] && [ -d "$MAIN" ] || MAIN=$REPO
 FALLBACK_WT="$MAIN/.loopable/worktrees/$(printf '%s' "$BRANCH" | tr '/' '-')"
@@ -320,11 +320,11 @@ ours_worktree() { # ours_worktree <path> <branch>
   ours_branch "$2" && return 0
   p=$(phys "$1")
   if [ -z "$CMD" ]; then [ "$p" = "$(phys "$FALLBACK_WT")" ]; return; fi
-  # A path word, read from where the command ran — resolved now, when the
-  # directory it names exists, so a symlinked parent compares equal.
+  # A path word, read from where the command ran — the MAIN checkout — resolved
+  # now, when the directory it names exists, so a symlinked parent compares equal.
   while IFS= read -r w; do
     [ -n "$w" ] || continue
-    case "$w" in /*) ;; *) w="$REPO/$w" ;; esac
+    case "$w" in /*) ;; *) w="$MAIN/$w" ;; esac
     [ "$(phys "$w")" = "$p" ] && return 0
   done <<EOF
 $CMD_WORDS
@@ -410,7 +410,10 @@ else
   BR_BEFORE=$(branches)
   MADE=1
   if [ -n "$CMD" ]; then
-    ( cd "$REPO" && eval "$CMD" ) || fail \
+    # FROM THE MAIN CHECKOUT, like the fallback (371): a start: line with a
+    # relative path — this repository's is — run from inside a linked worktree
+    # would nest the new worktree in that one, and it goes when that one does.
+    ( cd "$MAIN" && eval "$CMD" ) || fail \
       "The repository's own start command failed:
 
   $CMD
