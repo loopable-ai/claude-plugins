@@ -349,6 +349,32 @@ class TheStandIns(unittest.TestCase):
         finally:
             w.close()
 
+    def test_ready_on_its_own_filing_waits_for_readiness_as_the_api_does(self):
+        """OWN_FILING_EDGES lets the token take todo -> ready on its own filing,
+        and updateItem's readyGate refuses it while readiness() has blockers."""
+        w = Walk('after-merge')
+        try:
+            p = w.fx['project']
+            w.tool('add_item', {'project_id': p, 'title': 'mine, unbriefed', 'kind': 'task'})
+            ref = str(w.tool('list_backlog', {'project_id': p, 'status': 'todo'})['items'][-1]['ref'])
+            refused = w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'ready'}, ok=False)
+            self.assertIn('readiness has blockers: no_brief, no_verifiable_criterion', refused['error'])
+            pack = w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']
+            self.assertEqual(pack['item']['ready_blockers'], ['no_brief', 'no_verifiable_criterion'])
+            self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['status'], 'todo')
+            # The delegate (the holder's edges) meets the same gate (380).
+            state = w.ws / '.loopable-eval/backlog.json'
+            s = json.loads(state.read_text())
+            s['token']['person_edges'] = True
+            s['environments'] = []
+            state.write_text(json.dumps(s))
+            w.tool('write_brief', {'project_id': p, 'item_id': ref, 'title': 'mine',
+                                   'criteria': [{'text': 'it is', 'verify': 'manual'}]})
+            refused = w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'ready'}, ok=False)
+            self.assertIn('readiness has blockers: no_environment', refused['error'])
+        finally:
+            w.close()
+
     def test_curl_answers_the_api_the_upload_bucket_and_the_deploy_only(self):
         w = Walk('after-merge')
         try:
@@ -431,10 +457,70 @@ class TheRevisionCheck(unittest.TestCase):
 
     def test_main_head_a_release_tag_and_a_commit_on_main_are_admitted(self):
         co = self.checkout()
-        self.assertAdmitted(co, 'origin/main', 'HEAD', self.m2, self.m2)
-        self.assertAdmitted(co, 'refs/remotes/origin/main', 'main', self.m2, self.m2)
+        self.assertAdmitted(co, self.m1, 'HEAD', self.m1, self.m2)
+        self.assertAdmitted(co, self.m1[:7], 'origin/main', self.m1, self.m2)
+        self.assertAdmitted(co, 'refs/remotes/origin/main', self.m1, self.m2, self.m1)
         self.assertAdmitted(co, 'loopable-plugin-v1.0.0', 'main', self.m1, self.m2)
-        self.assertAdmitted(co, self.m1, self.m1[:7], self.m1, self.m1)
+        self.assertAdmitted(co, 'latest-release', 'HEAD', self.m1, self.m2)
+
+    def test_a_commit_compared_with_itself_is_refused(self):
+        co = self.checkout()
+        for old, new in (('origin/main', 'HEAD'), ('main', 'refs/remotes/origin/main'),
+                         (self.m1, self.m1[:7]), ('latest-release', 'loopable-plugin-v1.0.0')):
+            rc, out, err = self.admit(co, old, new)
+            self.assertEqual((rc, out), (1, {}), f'{old!r} and {new!r} were admitted: {err}')
+            self.assertIn('are the same commit', err)
+
+    def test_latest_release_is_the_newest_release_tag_main_holds(self):
+        co = self.checkout()
+        self.git(co, 'tag', 'loopable-plugin-v1.10.0', self.m2)   # newer than v1.9.0 by version, not by text
+        self.git(co, 'tag', 'loopable-plugin-v1.9.0', self.m1)
+        self.git(co, 'tag', 'loopable-plugin-v9.9.9', self.u)     # newest of all, on code nobody merged
+        self.git(co, 'tag', 'loopable-plugin-v99', self.u)        # not a release's spelling
+        self.git(co, 'push', '-q', 'origin', 'loopable-plugin-v1.10.0', 'loopable-plugin-v1.9.0',
+                 'loopable-plugin-v9.9.9', 'loopable-plugin-v99')
+        try:
+            self.assertAdmitted(self.checkout(), 'latest-release', self.m1, self.m2, self.m1)
+        finally:
+            self.git(co, 'push', '-q', 'origin', ':refs/tags/loopable-plugin-v1.10.0',
+                     ':refs/tags/loopable-plugin-v1.9.0', ':refs/tags/loopable-plugin-v9.9.9',
+                     ':refs/tags/loopable-plugin-v99')
+
+    def test_a_hex_prefix_that_names_two_commits_on_main_is_refused(self):
+        """Two commits on main sharing a seven-digit prefix, found by hashing
+        candidate commit objects here (a birthday search, some 20k sha1s) and
+        written with hash-object, then merged into main. A prefix that names
+        both is refused; loosening the one-commit rule would admit either."""
+        import hashlib
+        co = self.checkout()
+        tree = self.git(co, 'rev-parse', self.m2 + '^{tree}')
+        def body(i):
+            who = 'Check <check@example.invalid> 1700000000 +0000'
+            return (f'tree {tree}\nparent {self.m2}\nauthor {who}\ncommitter {who}\n\ncollide {i}\n').encode()
+        seen, i = {}, 0
+        while True:
+            raw = body(i)
+            prefix = hashlib.sha1(b'commit %d\0' % len(raw) + raw).hexdigest()[:7]
+            if prefix in seen:
+                break
+            seen[prefix] = i
+            i += 1
+        pair = []
+        for n in (seen[prefix], i):
+            pair.append(subprocess.run(['git', 'hash-object', '-t', 'commit', '-w', '--stdin'], cwd=co,
+                                       env=self.env, input=body(n), capture_output=True, check=True)
+                        .stdout.decode().strip())
+        self.assertEqual({p[:7] for p in pair}, {prefix})
+        merge = self.git(co, 'commit-tree', tree, '-p', pair[0], '-p', pair[1], '-m', 'both on main')
+        self.git(co, 'push', '-q', 'origin', merge + ':refs/heads/main')
+        try:
+            fetched = self.checkout()
+            self.assertAdmitted(fetched, pair[0], pair[1], pair[0], pair[1])
+            rc, out, err = self.admit(fetched, prefix, 'main')
+            self.assertEqual((rc, out), (1, {}), f'{prefix} names two commits and was admitted: {err}')
+            self.assertIn(f"'{prefix}' names 2 commits", err)
+        finally:
+            self.git(co, 'push', '-q', '-f', 'origin', self.m2 + ':refs/heads/main')
 
     def test_round_1_a_revision_main_does_not_hold_is_refused(self):
         co = self.checkout()
@@ -461,10 +547,10 @@ class TheRevisionCheck(unittest.TestCase):
         try:
             fetched = self.checkout()  # the tag arrives with the clone, as with --tags
             self.assertEqual(self.git(fetched, 'rev-parse', 'origin/main'), self.u)  # git's own reading
-            self.assertAdmitted(fetched, 'origin/main', 'main', self.m2, self.m2)
+            self.assertAdmitted(fetched, self.m1, 'origin/main', self.m1, self.m2)
             self.assertRefused(fetched, 'main', self.u)
             self.git(fetched, 'branch', 'origin/main', self.u)
-            self.assertAdmitted(fetched, 'origin/main', 'HEAD', self.m2, self.m2)
+            self.assertAdmitted(fetched, 'origin/main', self.m1, self.m2, self.m1)
         finally:
             self.git(co, 'push', '-q', 'origin', ':refs/tags/origin/main')
 
@@ -509,6 +595,18 @@ class TheRevisionCheck(unittest.TestCase):
         self.assertNotIn('inputs.new', evals)
         self.assertLess(text.index('Only revisions main already holds'), text.index('secrets.ANTHROPIC_API_KEY'))
 
+    @unittest.skipUnless(WORKFLOW.exists(), 'the workflow lives in the platform repository, not the release')
+    def test_the_forms_defaults_dispatched_from_main_compare_two_commits(self):
+        """A person who clicks Run on main with the form untouched: actions/checkout
+        leaves HEAD at main's tip, and the run must still compare two commits."""
+        inputs = '\n' + WORKFLOW.read_text().split('    inputs:\n', 1)[1].split('\npermissions:', 1)[0]
+        default = lambda name: re.search(r'\n      ' + name + r':\n(?:        .*\n)*?        default: (.*)\n',
+                                         inputs).group(1).strip().strip('"')
+        old, new = default('old'), default('new')
+        co = self.checkout()
+        self.assertEqual(self.git(co, 'rev-parse', 'HEAD'), self.m2)
+        self.assertAdmitted(co, old, new, self.m1, self.m2)
+
 
 class TheStatistics(unittest.TestCase):
     def test_cases_are_compared_one_by_one_and_never_pooled(self):
@@ -535,6 +633,77 @@ class TheStatistics(unittest.TestCase):
         self.assertIn('saturated', text)
         self.assertNotIn('pooled', text)
         self.assertEqual(stats.fisher_two_sided(3, 3, 0, 3), 0.1)
+
+
+class TheRunner(unittest.TestCase):
+    """run-ab.sh, in a scratch repository holding a copy of it, a plugin.json and a
+    stand-in self-test that leaves a marker, prints a count line shaped like this
+    file's, and exits as told. DRY=1 throughout: nothing reaches claude."""
+
+    STUB = ('import os, sys\n'
+            "open(os.environ['MARK'], 'w').close()\n"
+            "print('F' if os.environ['SELF_TEST_RC'] != '0' else '.')\n"
+            "print('\\n3 tests, 7 grader scorings, 9 cases')\n"
+            "sys.exit(int(os.environ['SELF_TEST_RC']))\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name).resolve() / 'repo'
+        (self.repo / 'plugin/evals').mkdir(parents=True)
+        (self.repo / 'plugin/.claude-plugin').mkdir()
+        (self.repo / 'plugin/.claude-plugin/plugin.json').write_text('{"version": "0.0.1"}\n')
+        shutil.copy(EVALS / 'run-ab.sh', self.repo / 'plugin/evals/run-ab.sh')
+        (self.repo / 'plugin/evals/test-fixtures.py').write_text(self.STUB)
+        self.env = {**os.environ, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
+                    'GIT_AUTHOR_NAME': 'Check', 'GIT_AUTHOR_EMAIL': 'check@example.invalid',
+                    'GIT_COMMITTER_NAME': 'Check', 'GIT_COMMITTER_EMAIL': 'check@example.invalid',
+                    'DRY': '1', 'MARK': str(self.repo.parent / 'self-test-ran'), 'SELF_TEST_RC': '0'}
+        for args in (['init', '-q', '-b', 'main'], ['add', '-A'], ['commit', '-q', '-m', 'one']):
+            subprocess.run(['git', *args], cwd=self.repo, env=self.env, check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_ab(self, *refs, **env):
+        import time
+        start = time.monotonic()
+        done = subprocess.run(['bash', 'plugin/evals/run-ab.sh', *refs], cwd=self.repo,
+                              env={**self.env, **env}, capture_output=True, text=True, timeout=60)
+        return done, time.monotonic() - start
+
+    def test_a_bad_revision_fails_at_once_naming_it_before_the_self_test(self):
+        for refs, bad in ((('no-such-ref', 'HEAD'), "old revision 'no-such-ref'"),
+                          (('HEAD', 'deadbeef'), "new revision 'deadbeef'"),
+                          (('HEAD', '--output=x'), "new revision '--output=x'")):
+            done, took = self.run_ab(*refs)
+            self.assertEqual(done.returncode, 2, done.stderr)
+            self.assertEqual(done.stderr.splitlines(), [f'run-ab.sh: {bad} is not a commit here; nothing was run'])
+            self.assertEqual(done.stdout, '')
+            self.assertFalse(Path(self.env['MARK']).exists(), 'the self-test ran before the refs were checked')
+            self.assertLess(took, 5)
+        self.assertFalse((self.repo / 'x').exists())
+
+    def test_a_red_self_test_prints_no_count_line(self):
+        done, _ = self.run_ab('HEAD', 'HEAD', SELF_TEST_RC='1')
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(Path(self.env['MARK']).exists())
+        self.assertIn('the offline self-test is red; nothing was run', done.stderr)
+        self.assertIn('F', done.stderr.splitlines())
+        self.assertNotIn('grader scorings', done.stdout + done.stderr)
+
+    def test_a_green_self_test_prints_its_count_and_goes_on(self):
+        done, _ = self.run_ab('HEAD', 'main')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.splitlines()[0], '3 tests, 7 grader scorings, 9 cases')
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=self.repo, env=self.env, text=True)
+        self.assertIn(f'== old: HEAD ({sha[:12]}, plugin 0.0.1)', done.stdout)
+        self.assertIn('claude plugin eval', done.stdout)
+
+    def test_the_count_line_it_hides_is_the_one_this_file_prints(self):
+        text = Path(__file__).read_text()
+        self.assertIn('''print(f"\\n{ran} tests, {GRADED['count']} grader scorings, {len(EXPECTED)} cases")''', text)
+        self.assertIn("count_line='^[0-9]+ tests, [0-9]+ grader scorings, [0-9]+ cases$'",
+                      (EVALS / 'run-ab.sh').read_text())
 
 
 # ------------------------------------------------------------ the cases --

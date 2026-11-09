@@ -10,9 +10,14 @@
 #                                   the origin's main, fetched by its full name
 #     HEAD                          the commit the workflow checked out
 #     loopable-plugin-v<x.y.z>      a release tag, read as refs/tags/<it>
+#     latest-release                the newest loopable-plugin-v<x.y.z> tag, by
+#                                   version, whose commit main holds (the
+#                                   workflow's default baseline)
 #     7 to 40 hex digits            a commit, looked up as an object, never a ref
 #   Prints old=<sha> and new=<sha> on stdout (for $GITHUB_OUTPUT), after both
-#   are admitted; every refusal goes to stderr and exits 1.
+#   are admitted and found to be two different commits — a run comparing a
+#   commit with itself would be paid for and say nothing; every refusal goes to
+#   stderr and exits 1.
 #
 # NO NAME IS GIVEN TO GIT TO INTERPRET. A short name is resolved by git in an
 # order where a tag or a local branch called `origin/main` outranks the real
@@ -35,6 +40,19 @@ admit() { # <arm> <value>: prints the commit's sha, or refuses
   case "$ref" in
     main|origin/main|refs/remotes/origin/main) full=refs/remotes/origin/main ;;
     HEAD) full=HEAD ;;
+    latest-release)
+      # Full ref names from for-each-ref, never a short name, and each one must
+      # still spell a release; the newest by version that main holds wins.
+      local t
+      full=
+      while read -r t; do
+        [[ $t =~ ^refs/tags/loopable-plugin-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        sha=$(git rev-parse --verify --quiet --end-of-options "$t^{commit}") || continue
+        if git merge-base --is-ancestor "$sha" "$main"; then full=$t; break; fi
+      done < <(git for-each-ref --sort=-v:refname --format='%(refname)' 'refs/tags/loopable-plugin-v*')
+      [ -n "$full" ] ||
+        { echo "::error::$arm '$ref': no loopable-plugin-v<x.y.z> tag is on the origin's main" >&2; return 1; }
+      ;;
     *)
       if [[ $ref =~ ^loopable-plugin-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         full=refs/tags/$ref
@@ -65,4 +83,8 @@ admit() { # <arm> <value>: prints the commit's sha, or refuses
 
 old=$(admit old "$1")
 new=$(admit new "$2")
+if [ "$old" = "$new" ]; then
+  echo "::error::old '$1' and new '$2' are the same commit ($old): a run would compare it with itself; give a baseline such as latest-release or a loopable-plugin-v<x.y.z> tag" >&2
+  exit 1
+fi
 printf 'old=%s\nnew=%s\n' "$old" "$new"

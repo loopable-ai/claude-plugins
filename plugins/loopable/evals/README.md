@@ -95,11 +95,12 @@ an untouched workspace passes no case. And every grader of every case fails on a
 least one of that case's wrong walks or on the untouched workspace
 (`test_every_grader_can_fail`), so none is a grader that cannot fail. It also runs
 `main-revisions.sh`, the check that decides which revisions `plugin-evals.yml`
-hands the key to, against a scratch origin (`TheRevisionCheck`). Its last line is
-the count:
+hands the key to, against a scratch origin (`TheRevisionCheck`), and `run-ab.sh`
+itself in a scratch repository with a stand-in self-test (`TheRunner`). Its last
+line is the count:
 
 ```
-70 tests, 1023 grader scorings, 9 cases
+79 tests, 1023 grader scorings, 9 cases
 ```
 
 ## Running the model trials
@@ -114,9 +115,17 @@ DRY=1 plugin/evals/run-ab.sh origin/main HEAD                   # prints the com
 STATS_ONLY=<results dir> plugin/evals/run-ab.sh                  # re-reads a run, spends nothing
 ```
 
+Both revisions are resolved to a commit (`git rev-parse --verify`) before the
+self-test runs, so a bad one fails at once with one line naming it, and only the
+sha reaches `git archive`. A red self-test prints its failures without the count
+line, which would otherwise read like a green one.
+
 Or from GitHub: **Actions → plugin evals → Run workflow** (`plugin-evals.yml`,
 `workflow_dispatch` only), with the two revisions, runs per case, the model and
-the ceiling in the form. It reports and never gates a merge.
+the ceiling in the form. The form's baseline is `latest-release` — the newest
+`loopable-plugin-v<x.y.z>` tag main holds — against `HEAD`, so clicking Run on
+main compares the last release with main; two revisions that are one commit are
+refused before anything is spent. It reports and never gates a merge.
 
 The workflow hands an API key to agents that run Bash, so it is fenced:
 
@@ -126,8 +135,9 @@ The workflow hands an API key to agents that run Bash, so it is fenced:
   for a person and a workflow edited on another branch cannot reach the key.
 - **Only revisions main already holds.** Before the key is loaded,
   `main-revisions.sh` admits each of the two revisions or refuses the run. A
-  revision is `main` (or `origin/main`), `HEAD`, a `loopable-plugin-v<x.y.z>` tag or
-  a commit's hex, and nothing else: no name is handed to git to interpret, because
+  revision is `main` (or `origin/main`), `HEAD`, a `loopable-plugin-v<x.y.z>` tag,
+  `latest-release` (the newest such tag whose commit main holds) or a commit's hex
+  (a prefix that names more than one commit is refused), and nothing else: no name is handed to git to interpret, because
   git reads a short name in an order where a tag or a branch called `origin/main`
   outranks the real one, and a hex prefix loses to a ref of the same name. Each
   form becomes a full ref or an object id, and must be a commit on the origin's

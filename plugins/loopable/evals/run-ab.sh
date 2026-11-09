@@ -38,15 +38,29 @@ runs=${3:-1}
 total=${4:-8}
 root=$(git rev-parse --show-toplevel)
 evals=$root/plugin/evals
+
+# Both revisions resolve to a commit before anything else runs — the self-test
+# takes most of a minute, and a typo should not wait for it. From here on only
+# the sha is handed to git, so a ref is never read as an option by `archive`.
+for arm in old new; do
+  sha=$(git -C "$root" rev-parse --verify --quiet --end-of-options "${!arm}^{commit}") ||
+    { echo "run-ab.sh: $arm revision '${!arm}' is not a commit here; nothing was run" >&2; exit 2; }
+  printf -v "${arm}_sha" '%s' "$sha"
+done
+
 if [ -n "${DRY:-}" ]; then out=$(mktemp -d); else out=${EVAL_OUT:-$(mktemp -d)}; fi
 arms=${EVAL_ARMS:-old new}
 case "$arms" in "old new"|new) ;; *) echo "EVAL_ARMS must be 'old new' or 'new'" >&2; exit 2 ;; esac
 per_arm=$(awk -v t="$total" -v n="$(wc -w <<< "$arms")" 'BEGIN { printf "%.2f", t / n }')
 
 # The offline self-test first: a fixture that is not what it claims would make
-# every paid run measure the wrong thing.
+# every paid run measure the wrong thing. Its count line ("N tests, M grader
+# scorings, K cases") is printed only when it passed: after a red one it reads
+# like a green one, so the failures are shown without it.
+count_line='^[0-9]+ tests, [0-9]+ grader scorings, [0-9]+ cases$'
 python3 -B "$evals/test-fixtures.py" > "$out/self-test.log" 2>&1 ||
-  { tail -20 "$out/self-test.log" >&2; echo "the offline self-test is red; nothing was run" >&2; exit 1; }
+  { grep -Ev "$count_line" "$out/self-test.log" | tail -20 >&2
+    echo "the offline self-test is red; nothing was run" >&2; exit 1; }
 tail -1 "$out/self-test.log"
 
 export LOOPABLE_API_URL=https://backlog.example.invalid
@@ -58,10 +72,12 @@ unset GH_TOKEN GITHUB_TOKEN
 
 for arm in $arms; do
   ref=${!arm}
+  sha_var=${arm}_sha
+  sha=${!sha_var}
   dir=$out/$arm
   rm -rf "$dir" "$out/$arm.json"
   mkdir -p "$dir"
-  git -C "$root" archive "$ref" plugin | tar -x -C "$dir"
+  git -C "$root" archive "$sha" plugin | tar -x -C "$dir"
   # The release's .mcp.json runs @loopable/mcp@latest against the real API. The
   # cases use the loopable stand-in instead, so the copy declares a server that
   # is never started and could reach nothing if it were.
@@ -77,7 +93,7 @@ for arm in $arms; do
   [ -z "${EVAL_CASE:-}" ] || cmd+=(--case "$EVAL_CASE")
   [ -z "${EVAL_MODEL:-}" ] || cmd+=(--model "$EVAL_MODEL")
   [ -z "${EVAL_CONCURRENCY:-}" ] || cmd+=(--concurrency "$EVAL_CONCURRENCY")
-  echo "== $arm: $ref ($(git -C "$root" rev-parse --short "$ref"), plugin $(jq -r .version "$dir/plugin/.claude-plugin/plugin.json")), ceiling \$$per_arm"
+  echo "== $arm: $ref (${sha:0:12}, plugin $(jq -r .version "$dir/plugin/.claude-plugin/plugin.json")), ceiling \$$per_arm"
   if [ -n "${DRY:-}" ]; then printf '%q ' "${cmd[@]}"; echo; else "${cmd[@]}" || echo "(exit $?; partial results are still read)"; fi
 done
 
