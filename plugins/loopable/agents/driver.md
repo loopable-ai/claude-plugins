@@ -640,7 +640,8 @@ step 3 of Fix:
    `fix_round`.
 4. Spawn `loopable:masterbuilder` in the background, named `masterbuilder-<ref>`,
    with the ref, the worktree path, the branch, the pull request url, its head
-   sha, the path of `<state>/brief.md`, the `<state>/rounds/` directory — their
+   sha, the path of `<state>/brief.md`, the `<state>/rounds/` directory, and,
+   when the surveyor wrote one, the path of `<state>/survey.md` — their
    `<archive>` copies once the worktree is gone — the path of `AGENTS.md`, and
    your reason. Nothing else: the diagnosis is its job.
 

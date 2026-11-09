@@ -105,7 +105,8 @@ anything, and never run a `git` verb that writes.
   else, each with a line range and why it is the entry point.
 - **Likely paths:** the files a correct change will create, edit or delete, each
   with one short, checkable reason (`owns the transition`, `test for drafts.mjs`,
-  `new migration for the column`, `version bump AGENTS.md requires`). When unsure
+  `new migration for the column`, `version bump AGENTS.md requires`). One path per
+  bullet: two files are two bullets, even when they share a reason. When unsure
   whether a file will change, keep it and say so in its reason. Files that only
   explain the change go under Read first. Repository-relative paths only.
 - **Checks:** for each part of the repository the likely paths touch, the
@@ -173,8 +174,10 @@ One screen, at most 40 lines:
 
 ## Report
 
-Your final message to the driver is three lines: the path you wrote, the number
-of likely paths, and each open question. Nothing else: the file is the report.
+Your final message to the driver is exactly three lines, with nothing before them
+and nothing after: the path you wrote, the number of likely paths, and the open
+questions (each one on that line, or "none"). No greeting, no summary, no
+sentence about what you did: the file is the report.
 
 **You never:**
 - Edit, create or delete a file other than the survey, or run a `git` verb that

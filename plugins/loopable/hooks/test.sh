@@ -2926,13 +2926,37 @@ check "the driver spawns the surveyor before the builder" yes \
        index($0, "`loopable:surveyor`") && !s {s = NR}
        index($0, "`loopable:builder`") && !b {b = NR}
        END {print (s && b && s < b) ? "yes" : "no"}')"
+# The condition is read in the spawn sentence itself (387): the paragraph is
+# joined, and the condition must lead straight into the spawn. The phrase "names
+# no paths" anywhere in the step stayed green with the condition dropped from
+# the sentence that acts on it, because the paragraph's bold heading says it too.
 check "for an item whose brief names no paths" 1 \
-  "$(printf '%s\n' "$BUILD_STEP" | grep -c 'names no paths' | sed 's/^[1-9][0-9]*$/1/')"
+  "$(printf '%s\n' "$BUILD_STEP" | awk 'BEGIN {RS = ""} index($0, "`loopable:surveyor`")' | tr '\n' ' ' | tr -s ' ' |
+       grep -cF 'when no criterion, no line of the item and no amendment names a path in the repository, spawn a `loopable:surveyor`' |
+       sed 's/^[1-9][0-9]*$/1/')"
 check "and hands the builder the survey's path" 1 \
   "$(printf '%s\n' "$BUILD_STEP" | awk 'BEGIN {RS = ""} index($0, "Spawn a `loopable:builder`")' |
        grep -cF '<state>/survey.md' | sed 's/^[1-9][0-9]*$/1/')"
 check "which the builder reads" 1 \
   "$(grep -cF 'loopable/survey.md' "$AGENTS/builder.md" 2>/dev/null | sed 's/^[1-9][0-9]*$/1/')"
+# AND THE MASTER BUILDER GETS IT TOO (387). An escalated item's survey is the
+# same map the builder started from; the escalation step's spawn passes its
+# path — or the archive's copy, once the merge removed the worktree — and the
+# master builder's list of what the archive holds names it, because the merge
+# step copies it there.
+check "the escalation hands the master builder the survey's path" 1 \
+  "$(awk '/^#### Escalating to the master builder/ {f = 1; next} /^\*\*Hand to the person\*\*/ {f = 0} f' "$AGENTS/driver.md" 2>/dev/null |
+       awk 'BEGIN {RS = ""} index($0, "Spawn `loopable:masterbuilder`")' | grep -cF '<state>/survey.md' | sed 's/^[1-9][0-9]*$/1/')"
+check "and the master builder's archive list names survey.md" 1 \
+  "$(tr '\n' ' ' < "$AGENTS/masterbuilder.md" 2>/dev/null | tr -s ' ' | grep -o 'loopable/archive/<ref>/` ([^)]*)' |
+       grep -cF '`survey.md`' | sed 's/^[1-9][0-9]*$/1/')"
+# THE SURVEYOR'S REPORT IS ITS THREE LINES AND NOTHING ELSE (387). A real run
+# put a sentence before them and two paths on one likely-path bullet; a driver
+# reads the first line as the path, and a builder checks one path per bullet.
+check "the surveyor reports three lines with nothing before them" none \
+  "$(for w in 'exactly three lines, with nothing before them' 'One path per bullet'; do
+       tr '\n' ' ' < "$AGENTS/surveyor.md" 2>/dev/null | tr -s ' ' | grep -qF -- "$w" || printf '[%s] ' "$w"
+     done | sed 's/ $//' | grep . || echo none)"
 # THE BRIEF FILE IS ONE PATH IN THREE PROMPTS (361). The driver writes the pack
 # and every round's amendment to <state>/brief.md; the builder and the master
 # builder re-read it before they push and before they report, because a message

@@ -64,14 +64,17 @@ the driver decides, a person accepts.
 
 The driver gives you the item's ref, the absolute path of its worktree (`<wt>`),
 the branch, the pull request url and its head sha, the brief file, the rounds
-directory, the path of `AGENTS.md`, and why it escalated. `<state>` is
+directory, the surveyor's map when the item had one, the path of `AGENTS.md`,
+and why it escalated. `<state>` is
 `$(git -C <wt> rev-parse --absolute-git-dir)/loopable`: the brief file is
-`<wt gitdir>/loopable/brief.md` (`<state>/brief.md`), and each round's reports
-are under `<state>/rounds/<n>/` with the sha they were made at in `head`. Once
+`<wt gitdir>/loopable/brief.md` (`<state>/brief.md`), each round's reports
+are under `<state>/rounds/<n>/` with the sha they were made at in `head`, and
+the map is `<wt gitdir>/loopable/survey.md` (`<state>/survey.md`). Once
 a merge has removed the worktree, the driver's copy of them is in the main
 checkout's git dir, `$(git -C <main> rev-parse --absolute-git-dir)/loopable/archive/<ref>/`
-(`brief.md`, `rounds/`, `session`, `item`), and that is the directory it gives
-you. The driver is the only one who assigns you work.
+(`brief.md`, `rounds/`, `session`, `item`, and `survey.md` when there was one),
+and that is the directory it gives you. The driver is the only one who assigns
+you work.
 
 **Your working directory does not carry over between Bash calls.** Every command
 starts with `cd <wt> && `. Never edit the main checkout or another worktree:
