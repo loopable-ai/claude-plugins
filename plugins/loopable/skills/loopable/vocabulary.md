@@ -341,8 +341,11 @@ agent token may choose, then, to let it set `ready`, `verifying` and `done`
 for them. Those moves are still the person's — the trail names them and the
 token they came through — and the agent makes one only when the person asks
 for it, naming the items, never on its own judgement. Nothing else changes:
-such a token still never drops an item, and it reaches only what its
-membership reaches. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
+such a token still never drops an item, it reaches only what its
+membership reaches, and like every token it sets `ready` only once nothing is
+missing for the item to be ready — a brief written, a criterion that says how
+it will be checked, somewhere to run it. A person setting `ready` by hand is
+not asked. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
 
 ## The rank rule
 
