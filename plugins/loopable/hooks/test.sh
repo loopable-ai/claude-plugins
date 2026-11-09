@@ -114,8 +114,11 @@ case "$*" in
     # verb rides along, because which ones ran is the point of 362, and so
     # does the pull request it was run on, because which one is 370's.
     [ -n "${STUB_CALLS:-}" ] && printf 'GH\tpr %s\t%s\n' "$2" "$3" >> "$STUB_CALLS"
+    # STUB_PR_NOURL=1: a create that succeeds and prints no url (369), so the
+    # run has a draft it cannot name.
     case $2 in
-      create|edit) printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
+      create) [ "${STUB_PR_NOURL:-}" = 1 ] || printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
+      edit) printf 'https://github.com/wearewebera/sanfrancisco/pull/700\n' ;;
       comment) printf 'https://github.com/wearewebera/sanfrancisco/pull/700#issuecomment-1\n' ;;
     esac ;;
   *) exit 1 ;;
@@ -2174,6 +2177,10 @@ shipped() { cat "$STUB/shipout"; }
 closed_payload() { awk -F'\t' '$1 == "POST" && $2 ~ /\/close$/ {print $3}' "$STUB_CALLS"; }
 # How many times one `gh pr <verb>` ran, from the log the stub keeps.
 gh_ran() { awk -F'\t' -v v="pr $1" '$1 == "GH" && $2 == v' "$STUB_CALLS" | grep -c .; }
+# How many times one `gh pr <verb>` ran on one pull request.
+gh_ran_on() { awk -F'\t' -v v="pr $1" -v u="$2" '$1 == "GH" && $2 == v && $3 == u' "$STUB_CALLS" | grep -c .; }
+# The url the stub's `gh pr create` prints: the pull request a close opened.
+NEW_PR=https://github.com/wearewebera/sanfrancisco/pull/700
 
 echo " --prepare must REFUSE what cannot be shipped:"
 rm -f "$SDIR2/item" "$SDIR2/session"
@@ -2331,6 +2338,7 @@ git -C "$SHP" push -qf origin "$SHP_WAS:refs/heads/$SHP_BR" 2>/dev/null
 echo
 echo " --close, the whole sequence:"
 report pass met met
+: > "$STUB_GH_CALLS"
 run_ship --close
 check "a pass closes — exits 0"        0 "$RC"
 # REQUEST, PUT, CONFIRM, in that order, for each of the three files: two
@@ -2366,14 +2374,27 @@ check "and the close carries its url"  https://github.com/wearewebera/sanfrancis
   "$(printf '%s' "$P" | jq -r '.pr_url')"
 check "the close line names it too"    1 "$(shipped | grep -c 'verdict pass, at https://github.com/')"
 check "its body names the item, by ref" 1 "$(grep -c '^Loopable: 99' "$STUB_PR_SENT")"
-check "and carries the criteria, ticked" 2 "$(grep -c '^- \[x\]' "$STUB_PR_SENT")"
-check "and the reviewer's last word"   1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_SENT")"
+# A BODY IS WRITTEN ONCE AND OUTLIVES THE RUN (369): one this script opened on a
+# fail kept round 1's banner and unticked checklist after a later pass, since a
+# re-ship only comments. So the body carries no verdict at all — only where the
+# verification is — and the comment carries it, as on the builder's own draft.
+check "its body carries no criteria checklist" 0 "$(grep -c '^- \[' "$STUB_PR_SENT")"
+check "  no verdict banner nor verification" 0 \
+  "$(grep -cE 'Not verified|^## (Acceptance criteria|Verification|Reviewer)|^Verdict' "$STUB_PR_SENT")"
+check "  only a line pointing at the newest comment" 1 \
+  "$(grep -c 'verification and the review are in the newest comment' "$STUB_PR_SENT")"
+check "the comment carries the criteria, ticked" 2 "$(grep -c '^- \[x\]' "$STUB_PR_COMMENT")"
+check "and the reviewer's last word"   1 "$(grep -ci 'ship — nothing blocking' "$STUB_PR_COMMENT")"
 check "the title comes from the item, without its code" 1 \
   "$(shipped | grep -c 'Opened https')"
-# WITH NO PULL REQUEST, TODAY'S PATH AND ONLY IT (362): one create, and nothing
-# of the existing-PR path — its body already carries what a comment would.
+# WITH NO PULL REQUEST, ONE IS OPENED AS A DRAFT and finished the way the
+# builder's is: one comment on it, then — on a pass — ready (369).
 check "with no PR, one gh pr create"   1 "$(gh_ran create)"
-check "and no comment, ready or edit"  "0 0 0" "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
+check "  as a draft"                   1 "$(grep -c '^pr create --draft ' "$STUB_GH_CALLS")"
+check "  then one comment on it and one ready, no edit" "1 1 0" \
+  "$(gh_ran_on comment "$NEW_PR") $(gh_ran_on ready "$NEW_PR") $(gh_ran edit)"
+check "  the create, then the comment, then the ready" 1 \
+  "$(awk -F'\t' '$2 == "pr create" {o = NR} $2 == "pr comment" {c = NR} $2 == "pr ready" {r = NR} END {print (o && c && r && o < c && c < r) ? 1 : 0}' "$STUB_CALLS")"
 
 # THE TRAILER: the repository's own session attribution, passed in rather than
 # guessed at — a script cannot know a harness's session url.
@@ -2446,9 +2467,9 @@ for was in MERGED CLOSED; do
   : > "$STUB_GH_CALLS"
   run_ship --close
   check "only a $was PR — exits 0"       0 "$RC"
-  check "  it is not commented on, edited nor readied" "0 0 0" \
-    "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
   check "  no gh write touches it at all" 0 "$(gh_on "$GONE")"
+  check "  the new one is commented on and readied, nothing edited" "1 1 0" \
+    "$(gh_ran_on comment "$NEW_PR") $(gh_ran_on ready "$NEW_PR") $(gh_ran edit)"
   check "  a new pull request is opened" 1 "$(gh_ran create)"
   check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
     "$(closed_payload | jq -r '.pr_url')"
@@ -2483,9 +2504,9 @@ report pass met met
 printf '%s\ttrue\tHEAD\n' "$FORK" > "$STUB_PR_FORK"
 run_ship --close
 check "only a fork's open PR on this name — exits 0" 0 "$RC"
-check "  it is not commented on, edited nor readied" "0 0 0" \
-  "$(gh_ran comment) $(gh_ran ready) $(gh_ran edit)"
 check "  no gh write touches it at all" 0 "$(gh_on "$FORK")"
+check "  the new one is commented on and readied, nothing edited" "1 1 0" \
+  "$(gh_ran_on comment "$NEW_PR") $(gh_ran_on ready "$NEW_PR") $(gh_ran edit)"
 check "  a new pull request is opened"  1 "$(gh_ran create)"
 check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
   "$(closed_payload | jq -r '.pr_url')"
@@ -2503,8 +2524,8 @@ check "  the close carries this branch's url" "$EXISTING" "$(closed_payload | jq
 report pass met met
 printf '%s\tfalse\t%s\n' "$FORK" 0123456789abcdef0123456789abcdef01234567 > "$STUB_PR_FORK"
 run_ship --close
-check "an open PR on this name at another sha — not taken" "0 0 1" \
-  "$(gh_ran comment) $(gh_ran ready) $(gh_ran create)"
+check "an open PR on this name at another sha — not taken" "0 1" \
+  "$(gh_on "$FORK") $(gh_ran create)"
 check "  the close records the new url" https://github.com/wearewebera/sanfrancisco/pull/700 \
   "$(closed_payload | jq -r '.pr_url')"
 : > "$STUB_PR_FORK"
@@ -2512,6 +2533,7 @@ check "  the close records the new url" https://github.com/wearewebera/sanfranci
 echo
 echo " a fail is still the truth, and still closes:"
 report fail met not_met 'the button does nothing on a narrow viewport'
+: > "$STUB_GH_CALLS"
 run_ship --close
 check "a fail verdict — exits non-zero" 1 "$RC"
 P=$(closed_payload)
@@ -2525,18 +2547,49 @@ check "not_met becomes skipped"        skipped \
   "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .status')"
 check "saying so in implemented_at"    1 \
   "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .implemented_at' | grep -c 'not met')"
-check "the pull request says it is not verified" 1 "$(grep -c 'Not verified' "$STUB_PR_SENT")"
+check "the comment says it is not verified" 1 "$(grep -c 'Not verified' "$STUB_PR_COMMENT")"
+check "and the body it opened does not" 0 "$(grep -c 'Not verified' "$STUB_PR_SENT")"
+# A PULL REQUEST IT OPENED ON A FAIL IS A DRAFT, AND STAYS ONE (369).
+check "  opened as a draft, commented on, never readied" "1 1 0" \
+  "$(grep -c '^pr create --draft ' "$STUB_GH_CALLS") $(gh_ran_on comment "$NEW_PR") $(gh_ran ready)"
 check "and the model is told to fix and ship again" 1 "$(shipped | grep -c 'ship again')"
 # THE BANNER SAYS WHAT THE MERGE GUARD WILL DO (363). It used to say the guard
 # refused every non-pass "until a session closes pass", which stopped being
 # true of not_run: a fail is refused at this head, a not_run goes through on
 # the record.
 check "and that the merge guard refuses this head" 1 \
-  "$(grep -c 'The merge guard refuses a merge at this HEAD' "$STUB_PR_SENT")"
+  "$(grep -c 'The merge guard refuses a merge at this HEAD' "$STUB_PR_COMMENT")"
 report not_run met met 'no browser here'
 run_ship --close
 check "a not_run banner: let through, on the record" "1 0" \
-  "$(grep -c 'The merge guard lets this through with a warning' "$STUB_PR_SENT") $(grep -c 'merge guard refuses' "$STUB_PR_SENT")"
+  "$(grep -c 'The merge guard lets this through with a warning' "$STUB_PR_COMMENT") $(grep -c 'merge guard refuses' "$STUB_PR_COMMENT")"
+check "  and the pull request it opened is never readied" 0 "$(gh_ran ready)"
+
+# THE BUILDER'S DRAFT, ON A FAIL, STAYS A DRAFT (369). `gh pr ready` used to
+# run on every verdict, so a pull request the verifier had just failed left
+# draft and read as ready for review — with the banner saying the opposite in
+# a comment below it. Only a pass takes a draft out of draft.
+report fail met not_met 'the button does nothing on a narrow viewport'
+printf '%s\n' "$EXISTING" > "$STUB_PR_URL"
+: > "$STUB_GH_CALLS"
+run_ship --close
+check "the builder's draft, a fail verdict — exits non-zero" 1 "$RC"
+check "  it is commented on, once"     1 "$(gh_ran_on comment "$EXISTING")"
+check "  and NEVER marked ready"       0 "$(gh_ran ready)"
+check "  nor edited, nor a second one opened" "0 0" "$(gh_ran edit) $(gh_ran create)"
+check "  the comment carries the not-verified banner" 1 "$(grep -c '^> \*\*Not verified\.\*\* The verifier says `fail`' "$STUB_PR_COMMENT")"
+check "  and says the merge guard refuses this head" 1 \
+  "$(grep -c 'The merge guard refuses a merge at this HEAD' "$STUB_PR_COMMENT")"
+check "  the criterion not met is left unticked" 1 "$(grep -c '^- \[ \] The pull request names its item — not_met' "$STUB_PR_COMMENT")"
+check "  the run says it did not mark it ready" 1 "$(shipped | grep -c "Did not mark $EXISTING ready for review: the verdict is fail")"
+check "  and never claims it is a draft" 0 "$(shipped | grep -c "a draft:")"
+check "  and the close carries its url" "$EXISTING" "$(closed_payload | jq -r '.pr_url')"
+report not_run met met 'no browser here'
+run_ship --close
+check "the builder's draft, not_run — commented on, never readied" "1 0" \
+  "$(gh_ran_on comment "$EXISTING") $(gh_ran ready)"
+check "  the comment carries the not-verified banner" 1 "$(grep -c '^> \*\*Not verified\.\*\* The verifier says `not_run`' "$STUB_PR_COMMENT")"
+: > "$STUB_PR_URL"
 
 echo
 echo " a check only the deploy can show is owed after the merge (365):"
@@ -2552,7 +2605,7 @@ check "carrying its check, not where it landed" "open the deployed pull request 
   "$(printf '%s' "$P" | jq -r --arg c "$C2" '.criteria[] | select(.id == $c) | .implemented_at')"
 check "the verdict is still a pass"    pass "$(printf '%s' "$P" | jq -r '.verdict')"
 check "and the pull request says what is owed" 1 \
-  "$(grep -c 'checked after the merge: open the deployed pull request page' "$STUB_PR_SENT")"
+  "$(grep -c 'checked after the merge: open the deployed pull request page' "$STUB_PR_COMMENT")"
 # ANY OTHER VERDICT IS NOT MERGED, so it owes nothing after a merge: the API
 # refuses after_merge there, and ship.sh records the decision instead.
 report fail not_met after_merge 'the dirty tree went through'
@@ -2594,6 +2647,23 @@ P=$(closed_payload)
 check "the session is closed all the same" 1 "$(printf '%s\n' "$P" | grep -c .)"
 check "naming no pull request at all"  null "$(printf '%s' "$P" | jq -r '.pr_url // "null"')"
 check "and the body is left where a person can paste it" 1 "$(shipped | grep -c 'pr-body.md')"
+
+# A CREATE THAT PRINTS NO URL leaves a draft this run cannot name (369): no
+# comment and no ready can be run on it, so on a pass the hand-finish names
+# BOTH — a draft whose ready nobody was told to run stays a draft after a pass.
+report pass met met
+STUB_PR_NOURL=1 run_ship --close
+check "a create with no url, a pass — exits non-zero" 1 "$RC"
+check "  no comment and no ready were run" "0 0" "$(gh_ran comment) $(gh_ran ready)"
+check "  the hand-finish names the comment" 1 "$(shipped | grep -c 'gh pr comment <url> --body-file .*pr-comment.md')"
+check "  and the ready"                   1 "$(shipped | grep -c 'gh pr ready <url>')"
+check "  the last line names the pull request, not an empty url" 1 \
+  "$(shipped | grep -c '^The pull request is not finished: the command above')"
+check "  and the close names no url"      null "$(closed_payload | jq -r '.pr_url // "null"')"
+report fail met not_met 'the button does nothing on a narrow viewport'
+STUB_PR_NOURL=1 run_ship --close
+check "a create with no url, a fail — the hand-finish names no ready" "1 0" \
+  "$(shipped | grep -c 'gh pr comment <url>') $(shipped | grep -c 'gh pr ready')"
 
 echo
 echo " the API refusing is said in the API's own words:"

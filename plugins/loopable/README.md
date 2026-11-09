@@ -452,10 +452,13 @@ sometimes not:
    builder opens on its first push, so CI runs while the verifier works — the
    title and body are the builder's and are never edited: the criteria as a
    ticked checklist, the verdict and the reviewer's last line go on it as ONE
-   comment naming the HEAD it is about, and `gh pr ready` takes it out of draft.
-   When it has none, it **opens** one, titled from the item and bodied with the
-   ask, that same checklist, verdict and last line, and `Loopable: <ref>`.
-   `--trailer '<line>'` appends a harness's own session link to either;
+   comment naming the HEAD it is about. When it has none, it **opens** one as a
+   draft, titled from the item, whose body is the ask, a line saying the
+   verification is in the newest comment, and `Loopable: <ref>` — no banner and
+   no checklist, since a body outlives the round that wrote it — and posts the
+   same comment on it. Only a `pass` runs `gh pr ready`: on `fail` or `not_run`
+   the pull request stays a draft, and the comment's banner says why.
+   `--trailer '<line>'` appends a harness's own session link to the body and the comment;
    a script cannot know one. **Before the close, and that order is deliberate**:
    the close takes the url and a closed session is never updated again, so this
    is the only moment the link can be recorded. It also means a `gh` that fails
@@ -547,8 +550,8 @@ as `guard_allowed` — which the driver reads and never takes for a pass: it
 merges only on a `pass` at the head going in. When `start.sh` or
 `ship.sh` **breaks** — fails at its own job rather than refusing the item — the
 driver stands in: it does the steps the script did not, in its order and with its
-refusals — for `--close`, every one: the attachments, the comment and
-`gh pr ready` on the builder's draft (or a new pull request's body), an OPEN
+refusals — for `--close`, every one: the attachments, a new draft when there is
+none, the comment, and `gh pr ready` on a `pass` only, an OPEN
 pull request only, and the whole contract with `pr_url`, since a closed
 session takes nothing afterwards — files the bug, and records what it did as a
 `stood_in` naming that bug. The merge guard is a gate, not machinery: nobody stands in for it.

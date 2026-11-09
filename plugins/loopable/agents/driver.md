@@ -386,17 +386,18 @@ printed and the record first — `git worktree list`, `<state>/session`,
   3. What the pull request gets, written as the script writes it — use its
      file when it got that far: the not-verified banner unless the verdict is
      `pass`, the criteria as a checklist, the verdict and its reason, and the
-     reviewer's last line as `Verdict: ship|hold — …`. For a new pull request
-     that is the body (`<state>/pr-body.md`, with the ask and
-     `Loopable: <ref>`); for one that exists it is a comment naming the commit
-     (`<state>/pr-comment.md`).
+     reviewer's last line as `Verdict: ship|hold — …` — always as a comment
+     naming the commit (`<state>/pr-comment.md`). A new pull request's body
+     (`<state>/pr-body.md`) carries none of it: the ask, a line saying the
+     verification is in the newest comment, and `Loopable: <ref>`.
   4. The pull request: only an OPEN one for this branch counts —
      `gh pr list --head <branch> --state open --json url`; a merged or closed
-     one is somebody else's history, never this close's link. When one is open
-     (the draft the builder opened on its first push), `gh pr comment <url>
-     --body-file <state>/pr-comment.md`, then `gh pr ready <url>` — never an
-     edit of its title or body. When none is, `gh pr create --body-file
-     <state>/pr-body.md`.
+     one is somebody else's history, never this close's link. When none is,
+     `gh pr create --draft --body-file <state>/pr-body.md` first. Then, on it
+     (the draft the builder opened on its first push, or that one),
+     `gh pr comment <url> --body-file <state>/pr-comment.md`, and
+     `gh pr ready <url>` ONLY on a `pass` — a `fail` or `not_run` leaves it a
+     draft. Never an edit of its title or body.
   5. `close_session` with the contract: `state` `complete`, the brief revision,
      the HEAD sha, the verdict and reason exactly as `verify.json` has them,
      every criterion with `implemented_at` and its status (`not_met` written as
@@ -474,10 +475,11 @@ When the implementer reports its branch pushed at a sha:
    implementation, do not tell them what works, and never edit what they write.
 3. When both have reported, `cd <wt> && "<plugin>/bin/ship.sh" --close`. It
    finishes the pull request — on the draft the builder opened at its first
-   push, a comment with the verification and the review and `gh pr ready`; with
-   none, a new one naming the item — closes the session with the contract and
-   moves the item to `in_review`. Exit 1 on `fail` or `not_run` is the contract telling the truth,
-   not an error.
+   push, or a new draft naming the item when there is none, a comment with the
+   verification and the review, and `gh pr ready` on a `pass` only — closes the
+   session with the contract and moves the item to `in_review`. Exit 1 on
+   `fail` or `not_run` is the contract telling the truth, not an error, and
+   the pull request stays a draft.
 4. Copy the run into `<state>/rounds/<n>/` — `n` is the fix rounds so far, `0`
    for the first ship — `verify.json`, `verify.md` and `review.md`, with the HEAD
    sha in `rounds/<n>/head`. The next `--prepare` clears the reports, and the

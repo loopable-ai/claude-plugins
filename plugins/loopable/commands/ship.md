@@ -38,15 +38,16 @@ included:
    `screenshot_ids`;
 3. what the pull request gets, as the script writes it (its file when it got
    that far): the not-verified banner unless the verdict is `pass`, the criteria
-   as a checklist, the verdict and reason, and the reviewer's last line — as a
-   comment naming the commit (`.git/loopable/pr-comment.md`) for a pull request
-   that exists, or as the body, with the ask and `Loopable: <ref>`
-   (`.git/loopable/pr-body.md`), for a new one;
+   as a checklist, the verdict and reason, and the reviewer's last line — always
+   as a comment naming the commit (`.git/loopable/pr-comment.md`); a new pull
+   request's body (`.git/loopable/pr-body.md`) is only the ask, a line saying
+   the verification is in the newest comment, and `Loopable: <ref>`;
 4. the pull request — only an OPEN one for this branch counts
-   (`gh pr list --head <branch> --state open`): on the builder's draft,
-   `gh pr comment` with that comment and then `gh pr ready`, never an edit of
-   its title or body; with none, `gh pr create` with that body. A merged or
-   closed one is never this close's link;
+   (`gh pr list --head <branch> --state open`); with none, `gh pr create
+   --draft` with that body first. On it, `gh pr comment` with that comment, and
+   `gh pr ready` only on a `pass` — a `fail` or `not_run` leaves it a draft.
+   Never an edit of its title or body. A merged or closed one is never this
+   close's link;
 5. `close_session` with the whole contract — brief revision, HEAD sha, the
    verdict and reason exactly as `verify.json` has them, every criterion with
    `implemented_at` and its status, `screenshot_ids`, the cost, and `pr_url`.
@@ -89,9 +90,11 @@ works, and do not edit what they return. A report you corrected is your report.
 It reads the two reports, attaches them and the screenshots to the Loopable
 session, and finishes the pull request. When the branch already has one — the
 draft a builder opens on its first push — it posts the verification and the
-review as one comment and runs `gh pr ready`, and never edits its title or body.
-When it has none, it opens one with the criteria checklist and `Loopable: <ref>`
-in its body. Then it closes the session with the contract — brief revision,
+review on it as one comment, and never edits its title or body. When it has
+none, it opens one as a draft, whose body is the ask, a line pointing at the
+newest comment and `Loopable: <ref>`, and posts the same comment on it. Only a
+`pass` runs `gh pr ready`; on `fail` or `not_run` the pull request stays a
+draft. Then it closes the session with the contract — brief revision,
 HEAD sha, verdict and reason, every criterion with where it landed and whether
 it is met, the screenshot ids, the cost, and that pull request's url. The pull
 request comes first because a closed session is never updated again, so the

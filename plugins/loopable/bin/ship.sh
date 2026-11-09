@@ -20,10 +20,10 @@
 #            exact shape the two reports must have.
 # --close    reads the two reports, uploads them and the screenshots as
 #            attachments on the session, finishes the pull request — on the
-#            draft the builder opened, one comment with the verification and
-#            the review and `gh pr ready`; with none, opens it naming the item
-#            — closes the session with the contract AND that url, and says
-#            what moved.
+#            draft the builder opened, or on one it opens as a draft naming
+#            the item when there is none: one comment with the verification
+#            and the review, and `gh pr ready` on a pass only — closes the
+#            session with the contract AND that url, and says what moved.
 #
 # A COMMAND IS NOT A HOOK. Every failure here prints a sentence and exits
 # non-zero — somebody typed this and is waiting for a pull request. The
@@ -42,7 +42,7 @@
 #
 # A `fail` VERDICT STILL CLOSES. The contract wants the truth, and a harness
 # that only reported successes would be a harness whose reports mean nothing.
-# The pull request says so in its body or its comment, the script exits 1, and
+# The pull request says so in its comment and stays a draft, the script exits 1, and
 # the merge guard refuses a merge at that HEAD while its close says `fail`.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -518,8 +518,12 @@ SCOPE=$(loopable_paths | awk 'NR==1{p=$0} END{if (NR==1) {sub(/.*\//, "", p); pr
 if [ -n "$SCOPE" ]; then PR_TITLE="$TYPE($SCOPE): $TITLE_TEXT"; else PR_TITLE="$TYPE: $TITLE_TEXT"; fi
 
 # THE VERIFICATION AND THE REVIEW, as a person reads them, in ONE copy: they
-# land in the body of a pull request this script opens, or in a comment on the
-# one the builder already opened (362), and two copies would drift.
+# land in a comment on the pull request — the one the builder already opened
+# (362), or the one this script opens when there is none — and never in a
+# body. A body is written once and outlives the run: a pull request this script
+# opened on a `fail` kept round 1's "Not verified" banner and unticked
+# checklist after a later pass (369), because a re-ship only comments. So the
+# body says where the verification is, and the newest comment is what it is.
 #
 # WHAT THE MERGE GUARD WILL DO WITH IT (363): it refuses a head whose close says
 # `fail`, and lets anything else through with a warning and a `guard_allowed`
@@ -557,10 +561,8 @@ findings() {
 
 BODY="$STATE/pr-body.md"
 {
-  not_verified
   [ -n "$ASK" ] && printf '%s\n\n' "$ASK"
-  findings
-  printf '\n'
+  printf 'The verification and the review are in the newest comment from `/loopable:ship`, which names the commit it is about.\n\n'
   printf 'Loopable: %s\n' "${REF:-$ITEM}"
   [ -n "$TRAILER" ] && printf '\n%s\n' "$TRAILER"
 } > "$BODY"
@@ -586,7 +588,7 @@ COMMENT="$STATE/pr-comment.md"
 # script's to rewrite. An edit is a second writer of the body the merge guard
 # reads, and in a repository whose workflows listen for `edited` it restarts CI
 # as well. So the run ADDS to it: one comment carrying the verification and the
-# review, then `gh pr ready`. Neither is fatal; what failed is said, with the
+# review, then — on a pass alone — `gh pr ready`. Neither is fatal; what failed is said, with the
 # command that finishes it, and the run exits non-zero at the end.
 #
 # ONLY AN OPEN ONE IS THE BUILDER'S (370). `gh pr view` on a branch answers
@@ -607,6 +609,34 @@ if [ -z "$PR_TROUBLE" ]; then
     jq -r --arg h "$HEAD_SHA" \
       '[.[] | select(.isCrossRepository == false and ((.headRefOid // "") | ascii_downcase) == $h)][0].url // empty' \
       2>/dev/null) || PR_URL=""
+  # WITH NONE, ONE IS OPENED — AS A DRAFT, and then finished exactly as the
+  # builder's is (369): its body says where the verification is, the comment
+  # below carries it, and only a pass takes it out of draft.
+  if [ -z "$PR_URL" ]; then
+    # The exit code is what decides, so the output goes to a file rather than
+    # through a pipe — `| tail -1` would report tail's success as gh's.
+    if gh pr create --draft --title "$PR_TITLE" --body-file "$BODY" > "$STATE/pr-out" 2>&1; then
+      PR_URL=$(grep -oE 'https://[^[:space:]]+' "$STATE/pr-out" | tail -1)
+      say "Opened ${PR_URL:-the pull request} as a draft"
+      # A DRAFT NOBODY CAN NAME is a draft nobody finishes: with no url the
+      # comment cannot be posted, and on a pass neither can the ready — so the
+      # hand-finish names both, the second only when the verdict earns it.
+      if [ -z "$PR_URL" ]; then
+        PR_UNFINISHED="gh pr create printed no url, so the verification could not be posted on it.
+
+Post it by hand:  gh pr comment <url> --body-file $COMMENT"
+        if [ "$VERDICT" = pass ]; then
+          PR_UNFINISHED="$PR_UNFINISHED
+Then mark it:     gh pr ready <url>"
+        fi
+        say "$PR_UNFINISHED" >&2
+      fi
+    else
+      PR_TROUBLE="gh pr create failed:
+
+$(cat "$STATE/pr-out")"
+    fi
+  fi
   if [ -n "$PR_URL" ]; then
     if gh pr comment "$PR_URL" --body-file "$COMMENT" > "$STATE/pr-out" 2>&1; then
       say "Commented on $PR_URL with the verification and the review"
@@ -618,7 +648,13 @@ $(cat "$STATE/pr-out")
 Post it by hand:  gh pr comment $PR_URL --body-file $COMMENT"
       say "$PR_UNFINISHED" >&2
     fi
-    if gh pr ready "$PR_URL" > "$STATE/pr-out" 2>&1; then
+    # ONLY A PASS IS READY FOR REVIEW (369). A draft is the pull request saying
+    # "not this head", and a `fail` or a `not_run` is the verifier saying the
+    # same thing — so on either the draft stays a draft, and the comment's
+    # banner says why. `gh pr ready` used to run on every verdict.
+    if [ "$VERDICT" != pass ]; then
+      say "Did not mark $PR_URL ready for review: the verdict is $VERDICT, and only a pass does"
+    elif gh pr ready "$PR_URL" > "$STATE/pr-out" 2>&1; then
       say "Marked $PR_URL ready for review"
     else
       NOT_READY="$PR_URL could not be marked ready for review:
@@ -631,17 +667,6 @@ Mark it by hand:  gh pr ready $PR_URL"
 
 }$NOT_READY"
     fi
-  else
-    # The exit code is what decides, so the output goes to a file rather than
-    # through a pipe — `| tail -1` would report tail's success as gh's.
-    if gh pr create --title "$PR_TITLE" --body-file "$BODY" > "$STATE/pr-out" 2>&1; then
-      PR_URL=$(grep -oE 'https://[^[:space:]]+' "$STATE/pr-out" | tail -1)
-      say "Opened ${PR_URL:-the pull request}"
-    else
-      PR_TROUBLE="gh pr create failed:
-
-$(cat "$STATE/pr-out")"
-    fi
   fi
 fi
 if [ -n "$PR_TROUBLE" ]; then
@@ -649,7 +674,8 @@ if [ -n "$PR_TROUBLE" ]; then
   say "Closing anyway, with no pull request url: the run is verified and the reports" >&2
   say "belong on the record. Open the PR by hand with \`Loopable: ${REF:-$ITEM}\` in its" >&2
   say "body — the close cannot be given the link afterwards, and nothing pretends it can." >&2
-  say "The body is written for you at $BODY." >&2
+  say "The body is written for you at $BODY, and the verification for its comment" >&2
+  say "at $COMMENT." >&2
 fi
 say
 
@@ -701,7 +727,7 @@ if [ -n "$PR_TROUBLE" ]; then
   exit 1
 fi
 if [ -n "$PR_UNFINISHED" ]; then
-  say "$PR_URL is not finished: the command above does what this run could not."
+  say "${PR_URL:-The pull request} is not finished: the command above does what this run could not."
   exit 1
 fi
 say "Shipped. A person reviews the diff and the verdict, and merges."

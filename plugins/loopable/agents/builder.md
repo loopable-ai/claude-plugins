@@ -8,7 +8,7 @@ description: |
   user: "Build 41 in /repo/.claude/worktrees/client-logo. The pack follows."
   assistant: "The builder reads the criteria and AGENTS.md, writes the tests first, implements to the criteria, runs the checks for the paths it touched, commits by name, pushes the branch, opens it as a draft pull request and reports the sha, the pull request and what each criterion rests on."
      <commentary>
-        One item is one worktree, one branch, one draft pull request, one report. The draft goes up with the first push so CI runs while the verifier works; ship.sh comments the verification and the review on it and marks it ready.
+        One item is one worktree, one branch, one draft pull request, one report. The draft goes up with the first push so CI runs while the verifier works; ship.sh comments the verification and the review on it and, on a pass, marks it ready.
      </commentary>
   </example>
 
@@ -147,7 +147,8 @@ delimiter is quoted so nothing in the body is expanded. Keep the word "merge"
 out of the title and the body: the merge guard checks any `gh` command that says
 it, and reads every number in it as a pull request to look up. After that,
 **never edit its title or body** and never mark it ready — `ship.sh --close`
-posts the verification and the review on it as a comment and runs `gh pr ready`.
+posts the verification and the review on it as a comment and, on a pass only,
+runs `gh pr ready`.
 
 ## 5. Report
 
