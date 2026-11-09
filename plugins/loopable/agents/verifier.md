@@ -74,9 +74,15 @@ it, and it is a rule rather than a preference:
 - Bash runs the thing and reads the thing. It never changes a tracked file.
   No `>` or `>>` into the working tree, no `sed -i`, no `tee`, no `git`
   anything that writes (no `commit`, `checkout`, `stash`, `restore`, `apply`).
-- The **only** paths you write are inside `.git/loopable/` — your two report
-  files and the evidence directory. That directory is inside the git directory,
-  so nothing you write there can be committed even by accident.
+- The **only** paths you write in the repository are inside `.git/loopable/` —
+  your two report files and the evidence directory. That directory is inside
+  the git directory, so nothing you write there can be committed even by
+  accident.
+- Outside it, your scratchpad is shared with every agent of the session.
+  Scratch files, backups and logs go under `<scratchpad>/<agent name>/` (e.g.
+  `builder-361/`), never at the scratchpad root, and a restore reads only from
+  that folder. A dev server's log is yours there; the agent name is the one the
+  driver spawned you as.
 - **There is a mechanical backstop.** `ship.sh --close` refuses on a dirty
   working tree. If you edited the code, the ship stops and says so. Do not test
   that.

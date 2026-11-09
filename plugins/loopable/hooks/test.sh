@@ -2764,6 +2764,17 @@ check "which the builder reads" 1 \
 check "the driver and both builders name the one brief file" none \
   "$(for a in driver builder masterbuilder; do
        grep -q 'loopable/brief\.md' "$AGENTS/$a.md" 2>/dev/null || printf '%s ' "$a"; done | sed 's/ $//' | grep . || echo none)"
+# EACH AGENT KEEPS ITS SCRATCH FILES IN A FOLDER OF ITS OWN (368). Four builders,
+# three verifiers and three reviewers once shared one session scratchpad: a
+# reviewer found `.bak` sabotage backups it had not made, and a builder had to
+# prove by cmp that its restores were its own. Every agent that runs beside
+# others carries the one sentence; the file is joined first, so wrapping it is
+# free and rewording it is not.
+SCRATCH='Scratch files, backups and logs go under `<scratchpad>/<agent name>/` (e.g. `builder-361/`), never at the scratchpad root, and a restore reads only from that folder.'
+check "every agent keeps its scratch files in a folder of its own" none \
+  "$(for a in builder masterbuilder verifier reviewer surveyor; do
+       tr '\n' ' ' < "$AGENTS/$a.md" 2>/dev/null | tr -s ' ' | grep -qF -- "$SCRATCH" || printf '%s ' "$a"
+     done | sed 's/ $//' | grep . || echo none)"
 # A STAND-IN FOR --close TAKES EVERY STEP THE SCRIPT TAKES (361, round 1). A
 # closed session never takes anything afterwards, so a stand-in that leaves out
 # the screenshot ids or the pull request's url leaves them out for good — and

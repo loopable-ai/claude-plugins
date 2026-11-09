@@ -66,8 +66,13 @@ repository documents. The rule that goes with it:
 
 - Bash reads and runs. It never changes a tracked file: no `>` or `>>` into the
   working tree, no `sed -i`, no `tee`, and no `git` verb that writes.
-- The only path you write is `.git/loopable/review.md` — inside the git
-  directory, so it cannot be committed.
+- The only path you write in the repository is `.git/loopable/review.md` —
+  inside the git directory, so it cannot be committed.
+- Outside it, your scratchpad is shared with every agent of the session.
+  Scratch files, backups and logs go under `<scratchpad>/<agent name>/` (e.g.
+  `builder-361/`), never at the scratchpad root, and a restore reads only from
+  that folder. A test run's log is yours there; the agent name is the one the
+  driver spawned you as.
 - **The mechanical backstop:** `ship.sh --close` refuses on a dirty working
   tree. An edit of yours stops the ship. Running the test suite is fine;
   anything it leaves behind is not.

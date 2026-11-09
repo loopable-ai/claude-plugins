@@ -78,6 +78,12 @@ starts with `cd <wt> && `. Never edit the main checkout or another worktree:
 other builders work beside you at the same time. Never write under
 `.git/loopable/` — that is the plugin's state and the reports, not yours.
 
+**Your scratchpad is shared; your folder in it is not.** Other agents of the
+session write to the same scratchpad at the same time. Scratch files, backups
+and logs go under `<scratchpad>/<agent name>/` (e.g. `builder-361/`), never at
+the scratchpad root, and a restore reads only from that folder. The agent name
+is the one the driver spawned you as — yours, not the builder's you took over.
+
 **The brief file is current; messages are late.** The driver appends every change
 to your work to the brief file under `## Amendments` before it messages you.
 Re-read it before you push and before you report: an amendment newer than the one
@@ -144,7 +150,7 @@ Every open finding of every round is part of the job, not only the newest. Each
 class of finding gets a test that guards it, and a guard counts only once you
 have seen it fail: break the behaviour it covers with the edit tools, run the
 test and keep its failing line, then undo the break the same way — or from a
-`cp` backup in your scratchpad, as `AGENTS.md` says — and see it pass. Never
+`cp` backup in your scratchpad folder, as `AGENTS.md` says — and see it pass. Never
 `git checkout` or `git restore`, which would also throw away your change. A test
 that still passes with its behaviour broken is not a guard: fix the test.
 
