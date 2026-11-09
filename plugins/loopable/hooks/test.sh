@@ -39,7 +39,13 @@ case "$*" in
   *"--json body,headRefOid"*)
     jq -n --rawfile b "$STUB_BODY" --arg s "$(cat "$STUB_HEAD")" \
       --arg r "$(cat "${STUB_HEAD_REF:-/dev/null}" 2>/dev/null)" \
-      '{body: $b, headRefOid: $s, headRefName: $r}' ;;
+      '{body: $b, headRefOid: $s, headRefName: $r, url: "https://github.com/o/r/pull/9"}' ;;
+  # A SHORT CLOSE SHA, RESOLVED ON GITHUB (381, amendment 3): `gh api
+  # repos/<owner>/<repo>/commits/<sha>`. The fixture is the commit GitHub
+  # answers with; empty is the refusal it gives an ambiguous or unknown sha.
+  *"api repos/"*"/commits/"*)
+    [ -s "${STUB_COMMIT:-/dev/null}" ] || { printf '{"message":"No commit found for SHA"}\n'; exit 1; }
+    cat "$STUB_COMMIT" ;;
   # WHICH PR A BRANCH IS (363): `gh pr view [<branch>] --json number`, asked in
   # the merge command's own directory, which is recorded so a case can say so.
   # No fixture, no PR — the answer gh gives on a branch with none.
@@ -221,6 +227,7 @@ export STUB_FILES="$STUB/files" STUB_BODY="$STUB/body" STUB_ITEMS="$STUB/items"
 export STUB_SESSIONS="$STUB/sessions" STUB_CALLS="$STUB/calls"
 export STUB_HEAD="$STUB/head" STUB_ITEM="$STUB/item" STUB_GH_CALLS="$STUB/ghcalls"
 export STUB_HEAD_REF="$STUB/headref" STUB_PR_NUMBER="$STUB/prnumber" STUB_ACTIVITY_FAIL=
+export STUB_COMMIT="$STUB/commit"
 printf 'feat/the-branch-9' > "$STUB_HEAD_REF"; : > "$STUB_PR_NUMBER"
 export STUB_PACK="$STUB/pack" STUB_NEXT="$STUB/next"
 export STUB_PR_URL="$STUB/prurl" STUB_PR_SENT="$STUB/prsent" STUB_PR_FAIL="$STUB/prfail"
@@ -557,6 +564,133 @@ gf "  a git subcommand off the list"              deny "git rebase --exec 'gh pr
 gf "  rg --pre= running it"                       deny "rg --pre='sh -c \"gh pr merge\"' x"
 gf "  rg --pre-glob beside --pre running it"      deny "rg --pre-glob '*.md' --pre 'sh -c \"gh pr merge\"' x"
 quiet "  rg with other flags stays a mention"      "rg -n --hidden 'gh pr merge' plugin"
+# A HEREDOC BODY IS ITS COMMAND'S INPUT, NOT COMMANDS (bug 381). A commit
+# message fed through `git commit -F - <<'EOF'` that said the merge phrase and
+# a number was looked up as that PR and refused. The body of a heredoc whose
+# delimiter is QUOTED (so the shell expands nothing in it) and which feeds a
+# plain `git commit` or `git tag` (whose input is a message, never run) is
+# taken out before anything is read; any other heredoc is read as before.
+H381="cd /x && git commit -F - <<'EOF'
+fix(plugin): the guard
+
+Says gh pr merge 14 in its body.
+EOF"
+check "bug 381: a heredoc commit message naming a merge" pass "$(verdict "$H381")"
+check "  asks nothing at all"                            0 "$(grep -c . "$STUB_GH_CALLS")"
+verdict "git -C sub commit -F - <<-\"MSG\"
+	gh pr merge 14 --squash
+	MSG" >/dev/null
+check "  <<- and a double-quoted delimiter ask nothing"  0 "$(grep -c . "$STUB_GH_CALLS")"
+verdict "git commit -F - <<\\EOF
+gh pr merge 14
+EOF" >/dev/null
+check "  a backslash-quoted delimiter asks nothing"      0 "$(grep -c . "$STUB_GH_CALLS")"
+verdict "git tag -a v1 -F - <<'EOF'
+gh pr merge 14
+EOF" >/dev/null
+check "  a git tag message asks nothing"                 0 "$(grep -c . "$STUB_GH_CALLS")"
+# AN UNQUOTED DELIMITER IS EXPANDED (security review, amendment 1): the shell
+# runs a $( ) or a backtick inside the body, so that body is read.
+gf "  an unquoted delimiter's \$( ) is read"      deny "git commit -F - <<EOF
+\$(gh pr merge 9)
+EOF"
+gf "  and its backticks"                          deny "git commit -F - <<EOF
+\`gh pr merge 9\`
+EOF"
+# A BODY WRITTEN WHERE IT CAN BE RUN IS NOT A MESSAGE (amendment 1): only git
+# commit and git tag, with nothing redirected and no option before the
+# subcommand but -C (a -c can point the hooks at a script that runs it).
+gf "  a quoted heredoc cat into a file"           deny "cat <<'EOF' > m.sh
+gh pr merge 9
+EOF"
+gf "  a quoted heredoc tee'd into a file"         deny "tee m.sh <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a commit whose output is redirected"        deny "git commit -F - <<'EOF' > out.sh
+gh pr merge 9
+EOF"
+gf "  a commit under git -c"                      deny "git -c core.hooksPath=h commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a commit after an assignment"               deny "GIT_DIR=x git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a grep's patterns are read now"             deny "grep -f - x <<'EOF'
+gh pr merge 9
+EOF"
+# THE WHOLE COMMAND IS THE ONE COMMIT (security review, amendment 2): a
+# statement before the git can make `git` mean something else — an alias, a
+# function, a PATH, a sourced file — so the body is skipped only when the
+# command is that one statement and its body, after at most a plain `cd <dir>
+# &&`.
+gf "  an alias of git before it"                  deny "alias git=bash; git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a function named git before it"             deny "function git { bash; }; git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a PATH set before it"                       deny "PATH=/tmp/x; git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a sourced file before it"                   deny "source x.sh && git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a git add before it"                        deny "git add a && git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a statement on a line before it"            deny "hash -p /bin/bash git
+git commit -F - <<'EOF'
+gh pr merge 9
+EOF"
+# NO QUOTE BEFORE THE << (amendment 3): words split without honouring quotes
+# read ' commit ' as the subcommand, while git runs an alias that hands its
+# input to sh. The cd argument is a plain word, and the line is an allowlist.
+gf "  a quoted -C value spelling commit"          deny "git -C ' commit ' -c alias.x=!sh x <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a quoted cd argument carrying the merge"    deny "cd 'x && gh pr merge 9' && git commit -F - <<'EOF'
+msg
+EOF"
+gf "  a word after the delimiter"                 deny "git commit <<'EOF' -c alias.commit=!sh
+gh pr merge 9
+EOF"
+# NOR A << INSIDE A \${ } OR A \$[ ] (amendment 2), which is no heredoc.
+gf "  a << inside \${ }"                          deny "git commit -F - \${X:-<<'EOF' }
+gh pr merge 9
+EOF"
+gf "  a << inside \$[ ]"                          deny "git commit -F - \$[ 1 <<'EOF' ]
+gh pr merge 9
+EOF"
+# ...and the rest of the command is still read: what follows the body, what
+# shares the heredoc's line, and a heredoc something runs.
+gf "  a merge after the heredoc ends"             deny "git commit -F - <<'EOF'
+msg
+EOF
+gh pr merge 9"
+gf "  a merge on the heredoc's own line"          deny "git commit -F - <<'EOF' && gh pr merge 9
+msg
+EOF"
+gf "  a heredoc fed to bash"                      deny "bash <<'EOF'
+gh pr merge 9
+EOF"
+gf "  a heredoc through cat into sh"              deny "cat <<'EOF' | sh
+gh pr merge 9
+EOF"
+gf "  a commit heredoc piped on to sh"            deny "git commit -F - <<'EOF' | sh
+gh pr merge 9
+EOF"
+gf "  a << inside quotes is no heredoc"           deny "git commit -m 'a <<EOF'
+gh pr merge 9
+EOF"
+gf "  a << in a comment is no heredoc"            deny "git status # git commit -F - <<EOF
+gh pr merge 9
+EOF"
+gf "  a body that is never closed is read"        deny "git commit -F - <<'EOF'
+gh pr merge 9"
+gf "  a commit heredoc inside \$( )"              deny "\$(git commit -F - <<'EOF'
+gh pr merge 9
+EOF
+)"
 closed "$STALE_SHA" pass
 : > "$STUB_PR_NUMBER"
 closed "$HEAD_SHA" pass
@@ -582,6 +716,49 @@ g "an open re-ship does not excuse a moved head" deny
 sessions_are "[{id:\"s-2\",state:\"error\",head_sha:\"$HEAD_SHA\",verdict:\"pass\"},
                {id:\"s-1\",state:\"complete\",head_sha:\"$STALE_SHA\",verdict:\"pass\"}]"
 g "an error close at this HEAD is not a close" deny
+# A SHORT SHA IS THE SAME COMMIT WHEN IT IS A PREFIX OF THE HEAD (bug 381). A
+# close recorded at 48d72b9 was refused as moved against a PR at 48d72b9309f7:
+# two spellings of one commit, compared as strings. A close's sha of seven to
+# thirty-nine hex characters that is a prefix of the head is RESOLVED ON
+# GITHUB, in the PR's own repository (security review, amendment 3): it is at
+# this head only when GitHub names exactly one commit for it and that commit
+# is the head. A head ground to share seven characters with the verified
+# commit makes the sha ambiguous there, and an ambiguous or failed lookup is
+# a moved head. Forty characters are compared as they are, with no lookup.
+commit_is() { jq -nc --arg s "$1" '{sha: $s}' > "$STUB_COMMIT"; }
+api_calls() { grep -c '^api repos/' "$STUB_GH_CALLS"; }
+commit_is "$HEAD_SHA"
+closed "${HEAD_SHA:0:7}" pass
+quiet "bug 381: a 7-character close GitHub resolves to this HEAD"
+check "  asked in the PR's own repository" 1 "$(grep -c "^api repos/o/r/commits/${HEAD_SHA:0:7}\$" "$STUB_GH_CALLS")"
+closed "${HEAD_SHA:0:12}" pass
+quiet "bug 381: a 12-character close GitHub resolves to this HEAD"
+closed "$(printf '%s' "${HEAD_SHA:0:12}" | tr a-f A-F)" pass
+quiet "bug 381: a 12-character close, in capitals"
+quiet "bug 381: typed from no repository, the PR's own is asked" "cd $STUB/nowhere && gh pr merge 9 --squash"
+closed "${HEAD_SHA:0:7}" fail "the login form throws on submit"
+g "bug 381: a fail at a 7-character close is a fail at this HEAD" deny
+check "  refused as failed, not as moved" yes "$(names 'verdict of fail' "$(reason_for 'gh pr merge 9 --squash')")"
+# GitHub's answer decides, not the prefix.
+commit_is "$STALE_SHA"; closed "${HEAD_SHA:0:7}" pass
+g "bug 381: a prefix GitHub resolves to another commit moved" deny
+check "  refused as moved" yes "$(names 'the branch moved' "$(reason_for 'gh pr merge 9 --squash')")"
+: > "$STUB_COMMIT"; closed "${HEAD_SHA:0:7}" pass
+g "bug 381: a prefix GitHub calls ambiguous or unknown moved" deny
+commit_is "$HEAD_SHA"
+closed "${STALE_SHA:0:7}" pass
+g "bug 381: a 7-character close that is not a prefix moved" deny
+closed "${STALE_SHA:0:12}" pass
+g "bug 381: a 12-character close that is not a prefix moved" deny
+closed "${HEAD_SHA:0:4}" pass
+g "bug 381: a close shorter than 7 is no close at this HEAD" deny
+closed "${HEAD_SHA:1:7}" pass
+g "bug 381: seven characters from inside the head are no prefix" deny
+# A FULL SHA IS COMPARED AS IT IS: no lookup, even with GitHub unreachable.
+: > "$STUB_COMMIT"; closed "$HEAD_SHA" pass
+quiet "bug 381: a 40-character close at this HEAD, GitHub not asked"
+check "  no commit lookup" 0 "$(api_calls)"
+closed "$HEAD_SHA" pass
 
 closed "$HEAD_SHA" fail "the login form throws on submit"
 g "a close at this HEAD whose verdict is fail" deny
@@ -773,7 +950,7 @@ check "  in its own worktree, the open session is not posted to" "none 1" \
 for c in "gh pr merge 9 -R o/r" "gh pr merge -Ro/r 9" "gh pr -R o/r merge 9" "gh pr --repo=o/r merge 9" "gh pr merge --repo o/r 9 2>&1"; do
   verdict "$c" >/dev/null
   check "--repo passed through: $c" "1 1" \
-    "$(grep -c '^pr diff 9 --name-only --repo o/r$' "$STUB_GH_CALLS") $(grep -c '^pr view 9 --json body,headRefOid,headRefName --repo o/r$' "$STUB_GH_CALLS")"
+    "$(grep -c '^pr diff 9 --name-only --repo o/r$' "$STUB_GH_CALLS") $(grep -c '^pr view 9 --json body,headRefOid,headRefName,url --repo o/r$' "$STUB_GH_CALLS")"
 done
 verdict "gh pr merge -R 'o/r;rm' 9" >/dev/null
 check "a repository that is not OWNER/REPO is not passed" 0 "$(grep -c -- '--repo' "$STUB_GH_CALLS")"

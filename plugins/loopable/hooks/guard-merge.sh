@@ -424,8 +424,101 @@ function run_mark(t, pos,    k) {
   k = runs_string(t, pos)
   return k == 1 ? "RUN" : (k == 2 ? "Q" : "-")
 }
+# A COMMIT OR TAG MESSAGE, and nothing else: pre, the words before the <<,
+# are exactly `git`, any number of `-C <dir>`, then commit or tag. Not a
+# path-qualified git (a script of that name may run its input), not after an
+# assignment or env (GIT_CONFIG_* can point the hooks at a script), and not
+# under -c or any other option for the same reason. 1 when it is one.
+function msg_cmd(pre,    n, ws, k) {
+  n = split(pre, ws, /[ \t]+/); k = 1
+  while (k <= n && ws[k] == "") k++
+  if (k > n || ws[k] != "git") return 0
+  for (k++; k <= n; k++) {
+    if (ws[k] == "") continue
+    if (ws[k] == "-C") { k++; continue }
+    return ws[k] == "commit" || ws[k] == "tag"
+  }
+  return 0
+}
+# THE COMMAND WITHOUT ITS COMMIT OR TAG MESSAGE (bug 381). A heredoc body is
+# the input of the command holding the <<, not commands of its own: a `git
+# commit -F - <<EOF` whose message said the merge phrase and a number was
+# looked up as that PR. The body is taken out, leaving the first line and the
+# delimiter line, only when the WHOLE command is that one statement:
+#
+#     [cd <dir> &&] git [-C <dir>]... commit|tag ... <<"DELIM"
+#     <the body>
+#     DELIM
+#
+# with nothing after the delimiter line but blank lines. Anything else is
+# returned as it came, and read like any other text. FAIL CLOSED, because each
+# looser rule was a way through (security reviews, amendments 1 and 2):
+#
+#   · the delimiter is QUOTED (in single or double quotes, or after a
+#     backslash: "DELIM" or \DELIM), so the shell
+#     expands nothing in the body; an unquoted body runs its $( ) and
+#     backticks;
+#   · the first line holds no $ and no backtick anywhere, quoted or not
+#     (${ } and $[ ] included, whose << is no heredoc), and outside quotes no
+#     backslash, ; | ( ) > { } [ ] #, no other <, and no & but the one && after
+#     the cd: no pipe or redirect hands the message, or what git prints, to
+#     something that may run it;
+#   · nothing comes before the git but that cd. A statement before it (an
+#     alias, a function, a PATH, a hash -p, a sourced file) can make `git`
+#     mean something else, and the body would be its input;
+#   · msg_cmd: the git is bare, under no option but -C, after no assignment.
+function strip_heredocs(t,    L, nl, line, n, i, c, q, at, amps, j, m, w, d, x, dash, pre, re) {
+  re = "^(" SQ "[A-Za-z0-9_]+" SQ "|\"[A-Za-z0-9_]+\"|\\\\[A-Za-z0-9_]+)"
+  nl = split(t, L, "\n")
+  if (nl < 2) return t
+  line = L[1]; n = length(line); q = ""; at = 0; amps = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1)
+    if (q == SQ) { if (c == SQ) q = ""; continue }
+    if (c == "$" || c == "`") return t
+    if (q != "") { if (c == "\\") return t; if (c == q) q = ""; continue }
+    if (c == SQ || c == "\"") { q = c; continue }
+    if (c == "<") {
+      # the one heredoc: << or <<-, then a quoted plain word, then a blank or the end
+      if (at || substr(line, i + 1, 1) != "<" || substr(line, i + 2, 1) == "<") return t
+      at = i; j = i + 2; dash = 0
+      if (substr(line, j, 1) == "-") { dash = 1; j++ }
+      while (substr(line, j, 1) == " " || substr(line, j, 1) == "\t") j++
+      w = substr(line, j)
+      if (!match(w, re)) return t
+      x = substr(w, RLENGTH + 1, 1)
+      if (x != "" && x != " " && x != "\t") return t
+      d = substr(w, 1, RLENGTH); gsub(/[\\"]/, "", d); gsub(SQ, "", d)
+      i = j + RLENGTH - 1
+      continue
+    }
+    if (c == "&") { amps++; continue }
+    if (index("\\;|()>{}[]#", c)) return t
+  }
+  if (q != "" || !at) return t
+  pre = substr(line, 1, at - 1)
+  # AND THE LINE IS AN ALLOWLIST (amendment 3): no quote at all before the
+  # <<, so no word is split differently from the way the shell splits it; a
+  # plain cd argument; plain -C values; plain words after commit or tag; and
+  # nothing after the delimiter.
+  if (index(pre, SQ) || index(pre, "\"")) return t
+  if (line !~ ("^[ \t]*(cd[ \t]+[A-Za-z0-9_./-]+[ \t]+&&[ \t]*)?git([ \t]+-C[ \t]+[A-Za-z0-9_./-]+)*[ \t]+(commit|tag)([ \t]+[-A-Za-z0-9=._/]+)*[ \t]+<<-?[ \t]*" substr(re, 2) "[ \t]*$")) return t
+  if (amps) {
+    if (amps != 2 || !match(pre, /^[ \t]*cd[ \t]+[^ \t&]+[ \t]*&&[ \t]*/)) return t
+    pre = substr(pre, RLENGTH + 1)
+  }
+  if (!msg_cmd(pre)) return t
+  for (m = 2; m <= nl; m++) {
+    x = L[m]; if (dash) sub(/^\t+/, "", x)
+    if (x == d) break
+  }
+  if (m > nl) return t
+  for (j = m + 1; j <= nl; j++) if (L[j] !~ /^[ \t]*$/) return t
+  return line "\n" L[m]
+}
 { cmd = cmd (NR > 1 ? "\n" : "") $0 }
 END {
+  if (STRIP != "") { printf "%s", strip_heredocs(cmd); exit }
   # ASK, a position, asks only what run_mark says about a gh there.
   if (ASK != "") { print run_mark(cmd, ASK + 0); exit }
   s = " " cmd; base = -1   # s, at j, is cmd at base + j
@@ -467,6 +560,19 @@ END {
 }'
 # The single quote arrives as a variable: this program is itself single-quoted,
 # and `\x27` is not an escape every awk knows.
+#
+# HEREDOC BODIES FIRST (bug 381): what a commit or a tag message fed through a
+# quoted heredoc says is taken out (strip_heredocs), and the questions asked
+# of the whole text above are asked again of what is left, so a message that
+# only mentions a merge passes here with nothing looked up. An awk that fails
+# or answers nothing leaves the command as it was.
+STRIPPED=$(printf '%s\n' "$CMD" | awk -v SQ="'" -v STRIP=1 "$MERGE_ARGS") && [ -n "$STRIPPED" ] || STRIPPED=$CMD
+if [ "$STRIPPED" != "$CMD" ]; then
+  CMD=$STRIPPED
+  NORM=$(printf '%s\n' "$CMD" | awk -v SQ="'" -v P= "$NORM_AWK")
+  printf '%s' "$NORM" | grep -qiE '(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]' || pass
+  printf '%s' "$NORM" | grep -qiE 'merge' || pass
+fi
 MERGES=$(printf '%s\n' "$CMD" | awk -v SQ="'" "$MERGE_ARGS")
 # THE SAME READING OF THE NORMALISED TEXT, asked only WHERE it finds merges,
 # never which PR: dropping every quote would make `--subject "fix 12" 9` read
@@ -617,6 +723,7 @@ ITEMS_CACHE=""
 ITEMS_DOWN=""
 PROJECT=""
 PROJECT_TRIED=""
+PR_HOST=""; PR_REPO=""
 DOWN='the Loopable backlog did not answer'
 
 # What the guard decided, PR by PR. Refusals are paragraphs for the reason;
@@ -649,6 +756,19 @@ allow() { # allow <pr> <head> <reason> <session or empty> <sentence> <why not re
 # <tied>, when set, is an item the body does NOT name but this PR's sessions
 # are on (security review of round 1): only the two refusals apply to it, and
 # the item the body names carries the warning.
+# THE FULL SHA GITHUB NAMES FOR A SHORT ONE, in the PR's own repository
+# (PR_HOST, PR_REPO: read from the PR's url by check_pr, never from the
+# command), or nothing. GitHub answers one commit or an error: an unknown sha
+# is a 422, and so is one that is ambiguous there — which a head ground to
+# share the verified commit's seven characters makes it, both commits being
+# in the repository. Nothing, then, and a close at nothing is a moved head.
+github_sha() { # github_sha <short sha>
+  local out
+  [ -n "$PR_REPO" ] || return 1
+  out=$(gh api ${PR_HOST:+--hostname "$PR_HOST"} "repos/$PR_REPO/commits/$1" 2>/dev/null) || return 1
+  printf '%s' "$out" | jq -r '.sha // ""' 2>/dev/null | tr 'A-F' 'a-f' | grep -xE '[0-9a-f]{40}'
+}
+
 check_item() { # check_item <pr> <head> <id> [marker] [said] [sessions] [tied]
   local pr=$1 head=$2 id=$3 marker=${4:-} said=${5:-} sessions=${6:-} tied=${7:-}
   local short row status title who lead target nowhere closes matched last verdict reason
@@ -687,7 +807,24 @@ check_item() { # check_item <pr> <head> <id> [marker] [said] [sessions] [tied]
   closes=$(printf '%s\n' "$sessions" | awk -F'\t' '$2 == "complete"')
   matched=""
   if [ -n "$closes" ]; then
-    matched=$(printf '%s\n' "$closes" | awk -F'\t' -v s="$head" 'tolower($3) == s {print; exit}')
+    # A SHORT SHA IS THE SAME COMMIT (bug 381). A close may record the sha
+    # abbreviated, and 48d72b9 against a head of 48d72b9309f7… was refused as
+    # moved by a string comparison. A close is at this head when its sha is
+    # hex, seven to forty characters, a prefix of the full head gh reported,
+    # and — when shorter than forty — GitHub resolves it, in the PR's own
+    # repository, to that head (github_sha). A prefix alone is 28 bits a pushed
+    # head can be ground to share; a local repository would be one the
+    # guarded command chooses (security reviews, amendments 2 and 3).
+    local crow c
+    while IFS= read -r crow; do
+      c=$(printf '%s' "$crow" | cut -f3 | tr 'A-F' 'a-f')
+      case $c in ''|*[!0-9a-f]*) continue ;; esac
+      [ ${#c} -ge 7 ] && [ ${#c} -le 40 ] && [ "${head:0:${#c}}" = "$c" ] || continue
+      [ ${#c} -eq 40 ] || [ "$(github_sha "$c")" = "$head" ] || continue
+      matched=$crow; break
+    done <<EOF
+$closes
+EOF
     if [ -z "$matched" ]; then
       # THE MOVED HEAD. A close says "I verified THIS"; a branch that moved
       # afterwards is a branch nobody verified, and the record still reads like
@@ -738,7 +875,7 @@ Fix it, re-run the verifier and close a session at the new HEAD (/loopable:ship)
 # an unknown number must not make the whole command suspicious, or `gh pr merge
 # 12 --squash` in a repo with no PR 12 would block on a typo.
 check_pr() { # check_pr <n> [repo]
-  local pr=$1 repo=${2:-} files view body head headref none_line refs ref id ids="" unresolved="" marker="" said all tied
+  local pr=$1 repo=${2:-} files view body head headref url none_line refs ref id ids="" unresolved="" marker="" said all tied
 
   files=$(gh pr diff "$pr" --name-only ${repo:+--repo "$repo"} 2>/dev/null) || return 0
   RESOLVED=1
@@ -752,10 +889,18 @@ check_pr() { # check_pr <n> [repo]
   # command text is ever read as a marker or as a sha. `gh pr merge 9  #
   # Loopable: <some in_review item>` has written a comment, and an argument
   # spelling a sha is an argument.
-  view=$(gh pr view "$pr" --json body,headRefOid,headRefName ${repo:+--repo "$repo"} 2>/dev/null) || return 0
+  view=$(gh pr view "$pr" --json body,headRefOid,headRefName,url ${repo:+--repo "$repo"} 2>/dev/null) || return 0
   body=$(printf '%s' "$view" | jq -r '.body // ""' 2>/dev/null) || return 0
   head=$(printf '%s' "$view" | jq -r '.headRefOid // ""' 2>/dev/null | tr 'A-Z' 'a-z')
   headref=$(printf '%s' "$view" | jq -r '.headRefName // ""' 2>/dev/null) || headref=""
+  # The PR's own repository, from the url GitHub gave for it, where a short
+  # close sha is resolved (github_sha). None read, and no short sha resolves.
+  PR_HOST=""; PR_REPO=""
+  url=$(printf '%s' "$view" | jq -r '.url // ""' 2>/dev/null) || url=""
+  if [[ $url =~ ^https://([A-Za-z0-9.-]+)/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/[0-9]+$ ]]; then
+    PR_REPO="${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
+    [ "${BASH_REMATCH[1]}" = github.com ] || PR_HOST=${BASH_REMATCH[1]}
+  fi
   # No sha, no rule to apply — and no PR either, in practice. `gh` answering
   # without one is `gh` not answering.
   [ -n "$head" ] || return 0
