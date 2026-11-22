@@ -3109,12 +3109,20 @@ check "and names every event on it" none \
 # it reads the backlog through the loopable MCP, never GitHub issues, writes
 # lanes, the board and the surveys under <main>/.loopable/marshal/ in
 # fountain's lane format, and ends by printing the command that starts each
-# lane's driver. It runs on the model its person picks, like the driver, and it
+# lane's driver. It runs on fable, pinned in its frontmatter (433), and it
 # never builds, edits a tracked file or merges.
 MARSHAL="$AGENTS/marshal.md"
 check "agents/marshal.md is named marshal" marshal "$(fm "$MARSHAL" 2>/dev/null | sed -n 's/^name: //p')"
 check "and says when to use it" 1 "$(fm "$MARSHAL" 2>/dev/null | grep -c '^description: ')"
-check "and runs on the model its person chooses" inherit "$(fm "$MARSHAL" 2>/dev/null | sed -n 's/^model: //p')"
+check "and runs on fable" fable "$(fm "$MARSHAL" 2>/dev/null | sed -n 's/^model: //p')"
+# EVERY AGENT IS PINNED TO ITS MODEL (433): marshal fable, builder sonnet, every
+# other one opus — the way fountain runs — so a driver started on opus no longer
+# runs its builders on opus, and a session on fable no longer runs everything on
+# fable. No agent is left at inherit, and a new agent must be named here.
+check "every agent is pinned to its model" \
+  "builder=sonnet driver=opus marshal=fable masterbuilder=opus reviewer=opus surveyor=opus verifier=opus" \
+  "$(for f in "$AGENTS"/*.md; do
+       printf '%s=%s ' "$(basename "$f" .md)" "$(fm "$f" 2>/dev/null | sed -n 's/^model: //p')"; done | sed 's/ $//')"
 check "it reads and files through the loopable MCP" none \
   "$(for w in '`list_backlog`' 'titles_only' '`get_item`' '`pull_item`' '`ready_blockers`' \
               '`add_item`' '`revise`' '`write_brief`' '`link_items`'; do
@@ -3143,8 +3151,11 @@ check "audits against AGENTS.md and the vocabulary, surveys the candidates" none
   "$(for w in 'AGENTS.md' 'vocabulary.md' '`loopable:surveyor`' 'nproc' 'share no files' 'in one go'; do
        grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 check "and ends with each lane's driver command" 1 \
-  "$(grep -cF 'claude --model <model> --agent loopable:driver "Follow lane <name>"' "$MARSHAL" 2>/dev/null |
+  "$(grep -cF 'claude --agent loopable:driver "Follow lane <name>"' "$MARSHAL" 2>/dev/null |
        sed 's/^[1-9][0-9]*$/1/')"
+check "which passes no --model: the driver's is in its frontmatter" none \
+  "$(grep -lF -- '--model <model>' "$MARSHAL" "$AGENTS/../README.md" 2>/dev/null | xargs -r -n1 basename |
+       tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
 check "it never builds, edits a tracked file or merges" 1 \
   "$(awk '/^\*\*You never:\*\*/ {f = 1} f' "$MARSHAL" 2>/dev/null | tr '\n' ' ' | tr -s ' ' |
        grep -cF 'Brief, build, verify, review or merge' | sed 's/^[1-9][0-9]*$/1/')"

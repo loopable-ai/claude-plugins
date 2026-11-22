@@ -20,7 +20,7 @@ description: |
         Reading and building are separate hands. The map is honest only if the reader has no stake in the change.
      </commentary>
   </example>
-model: sonnet
+model: opus
 color: cyan
 tools: Read, Grep, Glob, Bash
 ---

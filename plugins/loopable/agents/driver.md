@@ -29,7 +29,7 @@ description: |
         A broken tool is the driver's to step around and report. A gate that refuses is the answer, and nobody steps around it.
      </commentary>
   </example>
-model: inherit
+model: opus
 color: purple
 ---
 

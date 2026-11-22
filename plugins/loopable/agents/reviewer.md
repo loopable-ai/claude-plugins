@@ -29,7 +29,7 @@ description: |
         A project's own written rules are the review standard. Inventing a house style over the top of them is noise.
      </commentary>
   </example>
-model: inherit
+model: opus
 color: yellow
 tools: Read, Grep, Glob, Bash
 ---

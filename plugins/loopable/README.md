@@ -657,14 +657,18 @@ is ignored, so nothing of it is committed. It never builds, edits a tracked file
 or merges, and it ends by printing one command per lane:
 
 ```
-claude --model <model> --agent loopable:driver "Follow lane <name>"
+claude --agent loopable:driver "Follow lane <name>"
 ```
+
+It passes no `--model`, because every agent is pinned to its model in its
+frontmatter, the way fountain runs them: the marshal on fable, the driver,
+verifier, reviewer, surveyor and master builder on opus, the builder on sonnet.
 
 A driver started that way reads the lane as a planned batch, takes only its
 items, and leaves the other lanes' worktrees, branches and pull requests alone.
 Adapted from the marshal in Avanti Studio's fountain plugin, with the backlog in
 place of GitHub issues and the lane format kept; `test.sh` holds its frontmatter
-(`model: inherit`, like the driver's), its MCP reads, its paths, the lane format,
+(`model: fable`; every agent's model is pinned), its MCP reads, its paths, the lane format,
 the driver command and the driver's lane section.
 
 ## What it will not catch

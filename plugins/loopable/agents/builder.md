@@ -20,7 +20,7 @@ description: |
         A retry goes to the same builder, which still has its worktree and its context. It fixes the findings, not whatever else it would like to change.
      </commentary>
   </example>
-model: inherit
+model: sonnet
 color: blue
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---

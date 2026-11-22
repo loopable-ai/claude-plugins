@@ -29,7 +29,7 @@ description: |
         The marshal reads the drivers' work from the backlog, GitHub and their state files. It never messages a driver's teammates or touches their worktrees.
      </commentary>
   </example>
-model: inherit
+model: fable
 color: yellow
 ---
 
@@ -308,16 +308,16 @@ Out of scope: <what goes to a follow-up item>
 ```
 
 Then end by telling the person how to start each lane, one command per lane, from
-`<main>`, with the model you would run it on:
+`<main>`:
 
 ```
-claude --model <model> --agent loopable:driver "Follow lane <name>"
+claude --agent loopable:driver "Follow lane <name>"
 ```
 
-`<model>` is what `claude --model` takes (`opus`, `sonnet`, or a full model id):
-the strongest for a lane that carries the database, infrastructure, guards or AI
-behaviour, a lighter one for a lane of prose and small single-layer changes. Say
-in one line per lane why. Several drivers can share one checkout: each works only
+It passes no `--model`: every agent's model is pinned in its frontmatter — the
+driver, the verifier, the reviewer, the surveyor and the master builder on opus,
+the builders on sonnet, you on fable — so a lane runs the same whichever model
+its person's session is on. Several drivers can share one checkout: each works only
 its own items, in worktrees and branches named by ref. Say which refs still need
 marking `ready` and which `ready_blockers` a person must clear before a lane's
 driver can start them — `start.sh` refuses those, and you say so rather than
