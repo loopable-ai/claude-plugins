@@ -124,6 +124,16 @@ class Backlog:
             out.append('no_environment')
         return out
 
+    def ready_blockers(self, it, slim=True):
+        """ready_blockers as the API reads them (api/lib/readiness.mjs blockersNow):
+        only a todo or ready story, task or bug is judged now; anything else keeps
+        the stored column, which is null here. get_item gives the judged list, or
+        null when nothing is missing or nothing is judged (slim); the pack's item
+        says [] in those cases (api/lib/pack.mjs, `?? []`)."""
+        judged = (it['status'] in ('todo', 'ready') and it.get('kind') in ('story', 'task', 'bug'))
+        got = self.blockers(it) if judged else []
+        return got if got or not slim else None
+
     def pack(self, it):
         refs = {i['id']: i['title'] for i in self.s['items'].values()}
         edges = [{'relation': 'blocks', 'from': refs.get(l['blocker_id']), 'to': refs.get(l['blocked_id'])}
@@ -131,7 +141,7 @@ class Backlog:
         return {
             'item': {**self.summary(it), 'ask': it.get('ask'), 'body': it.get('body'),
                      'brief_rev': it.get('brief_rev', 0),
-                     'ready_blockers': self.blockers(it) if it['status'] in ('todo', 'ready') else []},
+                     'ready_blockers': self.ready_blockers(it, slim=False)},
             'criteria': [{'text': c['text'], 'verify': c['verify'], 'status': c.get('status', 'open')}
                          for c in it.get('criteria', [])],
             'neighbourhood': {'nodes': [], 'edges': edges},
@@ -141,7 +151,8 @@ class Backlog:
         }
 
     def full(self, it):
-        return {'item': {**self.summary(it), 'ask': it.get('ask'), 'body': it.get('body')},
+        return {'item': {**self.summary(it), 'ask': it.get('ask'), 'body': it.get('body'),
+                         'ready_blockers': self.ready_blockers(it)},
                 'brief': {'brief_rev': it.get('brief_rev', 0), 'ask': it.get('ask'),
                           'criteria': self.criteria(it),
                           'out_of_scope': it.get('out_of_scope', []),

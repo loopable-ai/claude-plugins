@@ -364,6 +364,53 @@ class TheStandIns(unittest.TestCase):
         finally:
             w.close()
 
+    def test_get_item_carries_ready_blockers_and_no_environment_is_judged(self):
+        """get_item reads ready_blockers on the item like pull_item and the API
+        do; no_environment is reported for a browser or http criterion with no
+        environment registered, and never for manual or eval criteria."""
+        w = Walk('after-merge')
+        try:
+            p = w.fx['project']
+            state = w.ws / '.loopable-eval/backlog.json'
+
+            def environments(rows):
+                # Read the state fresh each time: the fake writes between calls.
+                s = json.loads(state.read_text())
+                s['environments'] = rows
+                state.write_text(json.dumps(s))
+
+            def filed(title, verifies, kind='task'):
+                ref = str(w.tool('add_item', {'project_id': p, 'title': title, 'kind': kind})['item']['ref'])
+                if verifies:
+                    w.tool('write_brief', {'project_id': p, 'item_id': ref, 'criteria': [
+                        {'text': 'c' + v, 'verify': v} for v in verifies]})
+                return ref
+
+            def seen(ref):
+                """(get_item's ready_blockers, the pack's): the API's two shapes."""
+                got = w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['ready_blockers']
+                pack = w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']
+                return got, pack['item']['ready_blockers']
+
+            environments([])
+            self.assertEqual(seen(filed('unbriefed', [])),
+                             (['no_brief', 'no_verifiable_criterion'],) * 2)
+            self.assertEqual(seen(filed('browser', ['browser'])), (['no_environment'],) * 2)
+            self.assertEqual(seen(filed('http', ['manual', 'http'])), (['no_environment'],) * 2)
+            # Nothing missing: null on get_item, [] on the pack.
+            self.assertEqual(seen(filed('quiet', ['manual', 'eval'])), (None, []))
+            environments([{'kind': 'local', 'base_url': 'x'}])
+            self.assertEqual(seen(filed('with env', ['browser'])), (None, []))
+            # Not judged outside todo/ready, nor for an epic: the column, null.
+            environments([])
+            done = filed('finished', ['browser'])
+            w.tool('report_progress', {'project_id': p, 'item_id': done, 'status': 'done'})
+            self.assertEqual(seen(done), (None, []))
+            environments([])
+            self.assertEqual(seen(filed('an epic', [], kind='epic')), (None, []))
+        finally:
+            w.close()
+
     def test_curl_answers_the_api_the_upload_bucket_and_the_deploy_only(self):
         w = Walk('after-merge')
         try:
