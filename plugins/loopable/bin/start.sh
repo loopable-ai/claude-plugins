@@ -425,6 +425,17 @@ else
     # FROM THE MAIN CHECKOUT, like the fallback (371): a start: line with a
     # relative path — this repository's is — run from inside a linked worktree
     # would nest the new worktree in that one, and it goes when that one does.
+    #
+    # FETCH FIRST (432): the configured command usually cuts from origin/main,
+    # and a branch cut from a stale one starts behind a merge a minute old. A
+    # failed fetch is said and the start goes on from the origin/main there is,
+    # naming its commit: the command was asked for, and a person waiting is
+    # better told than refused.
+    if ! git -C "$MAIN" fetch origin >/dev/null 2>&1; then
+      say "Warning: \`git fetch origin\` failed; going on from the origin/main this checkout has,"
+      say "$(git -C "$MAIN" rev-parse --short origin/main 2>/dev/null || echo 'no origin/main'). It may be behind."
+      say
+    fi
     ( cd "$MAIN" && eval "$CMD" ) || fail \
       "The repository's own start command failed:
 

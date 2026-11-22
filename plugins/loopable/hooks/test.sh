@@ -2282,6 +2282,39 @@ check "the bare branch carrying a commit — exits non-zero" 1 "$RC"
 check "the branch is kept"             1 "$(has_branch feat/f8-the-start-command-41)"
 check "and it says why"                1 "$(printf '%s\n' "$OUT" | grep -c '^Kept the branch feat/f8-the-start-command-41: it has 1 commit beyond origin/main')"
 
+# A start: LINE SEES WHAT WAS PUSHED AFTER THE LAST FETCH (432): another clone
+# pushes to origin/main, this checkout has not fetched, and the branch must still
+# be cut from the new commit.
+echo
+echo " a start: line fetches first (432):"
+OTHER="$STUB/start-other"
+git clone -q "$ORIGIN" "$OTHER"
+echo pushed > "$OTHER/pushed.txt"
+git -C "$OTHER" add pushed.txt
+git -C "$OTHER" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "pushed after the fetch"
+git -C "$OTHER" push -q origin main
+NEWSHA=$(git -C "$OTHER" rev-parse HEAD)
+check "the checkout has not fetched it" 0 "$(git -C "$SRT" cat-file -e "$NEWSHA" 2>/dev/null && echo 1 || echo 0)"
+start_config "start: git worktree add .loopable/worktrees/p1-<slug> -b <type>/p1-<slug> origin/main"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a start: line after an unfetched push — exits 0" 0 "$RC"
+check "the branch is cut from the pushed commit" "$NEWSHA" "$(git -C "$SRT" rev-parse feat/p1-the-start-command-41)"
+
+# A FAILED FETCH: said, and the start goes on from the origin/main it has.
+git -C "$OTHER" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m "second"
+git -C "$OTHER" push -q origin main
+HAVE=$(git -C "$SRT" rev-parse origin/main)
+git -C "$SRT" remote set-url origin "$STUB/no-such-origin.git"
+start_config "start: git worktree add .loopable/worktrees/p2-<slug> -b <type>/p2-<slug> origin/main"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a failing fetch — the start still exits 0" 0 "$RC"
+check "it says the fetch failed" 1 "$(printf '%s\n' "$OUT" | grep -c 'git fetch origin. failed')"
+check "it prints the commit it went on from" 1 "$(printf '%s\n' "$OUT" | grep -c "^${HAVE:0:7}. It may be behind")"
+check "and the branch is cut from it" "$HAVE" "$(git -C "$SRT" rev-parse feat/p2-the-start-command-41)"
+git -C "$SRT" remote set-url origin "$ORIGIN"
+git -C "$SRT" fetch -q origin
+start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
+
 # THE BUG'S OWN SHAPE, for a line with no -b: the last word is not the branch
 # the command made, so the lookup fails — and what the run made goes with it.
 start_config "start: sh $STUB/mkwt.sh <type>/f5-<slug> origin/main"
