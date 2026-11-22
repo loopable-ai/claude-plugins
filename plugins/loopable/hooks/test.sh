@@ -3248,6 +3248,42 @@ check "its lanes, board and surveys live under .loopable/marshal" none \
   "$(for w in '<main>/.loopable/marshal/lanes/<name>.md' '<main>/.loopable/marshal/board.md' \
               '<main>/.loopable/marshal/surveys/<ref>.md'; do
        grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+# THE MARSHAL WRITES TO LOOPABLE (416): lanes and orders are rows now, written
+# with the lanes and orders tools; the file is the fallback for a tool that does
+# not answer, and the board is read from the board tool, board.md being only the
+# copy it prints.
+MARSHAL_FLAT=$(tr '\n' ' ' < "$MARSHAL" 2>/dev/null | tr -s ' ')
+check "the marshal writes lanes and orders with the MCP tools" none \
+  "$(for w in '**Write each lane to Loopable with the `lanes` tool**' '`create`' '`rewrite`' \
+              '`items` in run order' '`budget_hours`' '`decided`' '`merges`' '`out_of_scope`' '`stops`' \
+              'with the `orders` tool' 'and `ends` set to its id'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "its board is read from the board and lanes tools, board.md only the printed copy" none \
+  "$(for w in 'the `board` tool (action `read`' '`lanes` with action `get`' 'is only the printed copy' \
+              'the `board` and `lanes` reads above are the board'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "the lane file and orders.md are the fallback, said in the reply" none \
+  "$(for w in 'When the lanes tool is unreachable or answers an error' 'it is the fallback' \
+              'append the order to `<main>/.loopable/marshal/orders.md`'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "the lane file is written only when the tool fails, not as the way to write one" none \
+  "$(printf '%s' "$MARSHAL_FLAT" | grep -oE 'Write each lane to `<main>[^ ]*|mkdir -p <main>/.loopable/marshal/lanes|\*\*You produce:\*\* [^*]*lane files, the board' | sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "the marshal marks ready, accepts and drops at the word, and the trail records it" none \
+  "$(for w in 'You mark `ready` what you have briefed' 'you accept (`done`) and drop (`dropped`) at the person'"'"'s word' \
+              'the trail records you for each'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "and no longer carries the old rule that kept an agent from the later states" none \
+  "$(printf '%s' "$MARSHAL_FLAT" | grep -oiE "never sets? (ready|verifying|done)[^.]*|a person marks an item ready|start\.sh refuses an item that is not ready|only a person (marks|sets) [^.]*ready" |
+       sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "budgets are in minutes, 15 and 45, and twice the budget tops the board" none \
+  "$(for w in 'Budgets are in minutes' 'on 2026-11-22' 'about 15' 'about 45' 'Elapsed past twice the budget' \
+              'goes to the top of the board'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "a field the lanes API lacks goes in decided text and is named for a gap item" none \
+  "$(for w in 'holds no field for the survey path' 'in that item'"'"'s `decided` text' 'so the gap is filed as an item'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "the driver's start command names the lane's name in Loopable" 1 \
+  "$(printf '%s' "$MARSHAL_FLAT" | grep -cF 'with `<name>` the lane'"'"'s name in Loopable' | sed 's/^[1-9][0-9]*$/1/')"
 # The lane template is the fenced block that opens with `# Lane <name>`.
 LANE_FMT=$(awk '/^# Lane <name>/ {f = 1} f && /^```$/ {f = 0} f' "$MARSHAL" 2>/dev/null)
 check "a lane keeps fountain's format, by ref" none \

@@ -650,10 +650,13 @@ ready, waiting on an answer, blocked, too big and not scoped (an item's
 readiness is its brief and its `ready_blockers`). It asks the person every open
 question at once and records the answers on the briefs, as `/loopable:plan`
 does; runs `loopable:surveyor` on the candidates; and writes lanes whose items
-share no files, sized to the machine, then the board. Its files are under
-`<main>/.loopable/marshal/` — `lanes/<name>.md`, `board.md`, `surveys/` — which
-is ignored, so nothing of it is committed. It never builds, edits a tracked file
-or merges, and it ends by printing one command per lane:
+share no files, sized to the machine, in minutes, then the board. It writes each
+lane with the `lanes` tool and each order with the `orders` tool, and reads the
+board from the `board` tool; only when a tool does not answer does it fall back
+to `lanes/<name>.md` and `orders.md` and say so. Its scratch (`backlog.json`,
+audits, `surveys/`) and `board.md`, the printed copy of the board, are under
+`<main>/.loopable/marshal/`, which is ignored, so nothing of it is committed.
+It never builds, edits a tracked file or merges, and it ends by printing one command per lane:
 
 ```
 claude --agent loopable:driver "Follow lane <name>"
