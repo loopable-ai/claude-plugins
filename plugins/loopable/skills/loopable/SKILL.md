@@ -34,7 +34,7 @@ describe reasoning; the backlog says what is left to do.
 | `revise` | fix an item's title or body. Not its visibility, kind or parent. |
 | `link_items` | this must be done before that |
 | `ask_studio` | a question a person has to answer, into the escalations inbox |
-| `report_progress` | any status — `todo` / `ready` / `in_progress` / `in_review` / `verifying` / `done` / `blocked` / `awaiting_input` / `dropped` — with one sentence about what happened. Your move, on your judgement; the trail names the person and your token. `ready` still needs the item to have nothing missing. |
+| `report_progress` | any status — `todo` / `ready` / `in_progress` / `in_review` / `verifying` / `done` / `blocked` / `awaiting_input` / `dropped` — with one sentence about what happened. Your move, on your judgement; the trail names the person and your token. Readiness is reported on the item (`ready_blockers`), never a condition on `ready`. |
 
 `add_item` and `propose` are not two ways to do one thing. The line is **where
 the work came from**, not how much anybody is trusted: our own decided work
@@ -68,10 +68,11 @@ environments to point at. It replaces get_item plus neighbourhood plus
 list_decisions, and it is capped at 24 KB, so it costs the same every time and
 there is no judgement call about whether you can afford it.
 
-**Read `ready_blockers` first.** A non-empty list means nobody has groomed the
-item — no criterion carries a verify method, or the project has no registered
-environment — and it is not work to pick up yet. Say so and ask, rather than
-starting.
+**Read `ready_blockers` first.** A non-empty list is a report on the item — no
+brief, no criterion with a verify method, or a browser or http criterion with no
+registered environment. Nothing refuses a start or a `ready` because of it; say
+what is missing, write the brief when it is yours to write, and know that
+`start.sh` records the blockers on the session when you start anyway.
 
 **Build to the criteria, not to the title.** They are the spec, they are never
 trimmed out of a pack however big it gets, and `close_session` will ask you for
@@ -92,17 +93,17 @@ rather than running beside it.
 ```
 
 That is the one command for beginning work, and it does the whole sequence in
-order — pull the pack, refuse an item that is not `ready` and list its blockers,
-make the worktree from `origin/main` (through the repository's own `start:`
+order — pull the pack, refuse only an item somebody else is on or that is
+finished (readiness blockers are printed as warnings), make the worktree from `origin/main` (through the repository's own `start:`
 command when it has one), report `in_progress`, open the session, print the
 pack. Use it instead of doing those five by hand: the order is the point, and
-the step that gets skipped by hand is the refusal.
+the step that gets skipped by hand is recording the warnings.
 
 It refuses loudly rather than silently — a non-zero exit and a sentence — and a
 refusal leaves nothing behind and reports nothing — what a failed start made, it
-takes back, and says so. When it refuses
-because the item is not ready, the blockers it prints are the answer: say them,
-rather than starting anyway, and the item starts once they are cleared.
+takes back, and says so. It refuses
+an item somebody else holds, or one that is finished; it never refuses for
+readiness, and the blockers it prints as warnings are on the session's record.
 
 A script that **breaks** — fails at its own job, naming nothing about the item —
 is not a refusal. Do the steps it did not, in its order, with the readiness

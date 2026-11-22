@@ -85,9 +85,10 @@ status on your own judgement — `ready`, `verifying`, `done` and `dropped`
 included (`TRANSITIONS` in the API). Loopable is a tracker and a shared channel;
 the developer has freedom in Claude Code or any other tool. The record is the
 control: every move is on the item's trail naming the person and your token, so
-make each one for a reason you can say in the note's one sentence. `ready` is
-still refused while the item has `ready_blockers` (write what is missing first),
-and `start.sh` still starts only a `ready` item.
+make each one for a reason you can say in the note's one sentence. Readiness is
+a report, not a gate: `ready_blockers` says what is missing and nothing refuses
+a move or a start because of it. `start.sh` starts a `todo` or `ready` item,
+prints the blockers as warnings and records them on the session it opens.
 
 **Your memory is the backlog.** Status notes, sessions, close contracts and
 activities are where the next session — yours or a person's — finds out what
@@ -306,9 +307,9 @@ to look for. "Run the planned batch: 41 44 52" means:
   the note — while the rest of the batch goes on. A question the plan did not
   foresee parks that item and goes in the end-of-session report; it does not
   stop the run.
-- **An item still not `ready`** is not started: `start.sh` refuses it as
-  always. Mark it `ready` yourself when its brief allows, otherwise say what is
-  missing.
+- **An item with `ready_blockers`** is still started: `start.sh` prints them as
+  warnings and records them on the session. Say in the end-of-session report
+  what was missing, and write the brief first when it is yours to write.
 
 ### A lane
 
@@ -354,16 +355,13 @@ every implementer re-reads; each change to the work is appended to it under
 
 Non-zero is one of two things, and they are answered differently:
 
-- **A refusal** names a blocker about the item — not `ready`, held by another
-  session, a branch already there — and leaves nothing behind: what a failed
-  start made, it takes back, and it says so. It is the gate working,
-  and the blockers say who clears them. Not ready: say in one line what would
-  make it ready, mark it yourself once it is, and start it. When the blocker is the brief — no criterion with a
-  verify method — on an item the person named, read the current revision and
-  complete it with `write_brief` as in Filing work, so marking it ready is the
-  only step left. Held by someone else: it is theirs. Either way, go on with the
-  other items meanwhile, and never make its worktree past the refusal. A refusal
-  is a `start_refused`, which is not posted: there is no session to post it on.
+- **A refusal** names a blocker about the item — held by another session, in
+  review, done or dropped, a branch already there — and leaves nothing behind:
+  what a failed start made, it takes back, and it says so. Readiness is never
+  the reason: blockers are warnings the start prints and records. Held by
+  someone else: it is theirs. Go on with the other items meanwhile, and never
+  make its worktree past the refusal. A refusal is a `start_refused`, which is
+  not posted: there is no session to post it on.
 - **A breakage** is the script failing at its own job: an error that names
   nothing about the item, a step it says it could not finish, output the record
   contradicts. Stand in for it.
@@ -375,8 +373,8 @@ through the calls it makes, and nothing it would have refused. Read what it
 printed and the record first — `git worktree list`, `<state>/session`,
 `get_item`, `gh pr view` — and never redo a step it finished.
 
-- **`start.sh`:** `pull_item`, and an item with `ready_blockers` is still
-  refused, by you; then the worktree, from `<main>`: a worktree already on the
+- **`start.sh`:** `pull_item`, and an item somebody else holds is still
+  refused, by you (`ready_blockers` is only a warning); then the worktree, from `<main>`: a worktree already on the
   item's branch is reused, as the script reuses it, and otherwise one is made by
   the repository's own `start:` line in `.loopable.yaml` with its placeholders
   filled, or by the script's fallback, `.loopable/worktrees/<slug>` from
@@ -711,7 +709,7 @@ what is true.
 - Edit a tracked file, commit, push a branch or a commit, or fix a finding
   yourself. The one push that is yours is a release tag `AGENTS.md` names, at a
   merge commit.
-- Make a worktree past a refusal, or stand in for a gate: a readiness refusal and
+- Make a worktree past a refusal, or stand in for a gate: a collision refusal and
   the merge guard are the gates working.
 - Merge a head nobody verified, past a red check, a blocking finding that did not
   go to a follow-up, or a refusal.

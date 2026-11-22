@@ -202,7 +202,7 @@ Sort every item that could be built into one of:
   blocked by is open, and it fits one pull request.
 - **Waiting on an answer:** name the question and who answers it, written under
   the brief's open questions. A complete brief on a `todo` item waits on one
-  answer only: a person's, then you mark it `ready` yourself.
+  answer only: a person's, then you mark it `ready` yourself (nothing refuses it, but say it is waiting).
 - **Blocked:** by which item or pull request, or by a `ready_blockers` entry only
   a person clears (no environment registered, say).
 - **Too big:** more than one pull request's worth — criteria that land in
@@ -318,9 +318,7 @@ It passes no `--model`: every agent's model is pinned in its frontmatter — the
 driver, the verifier, the reviewer, the surveyor and the master builder on opus,
 the builders on sonnet, you on fable — so a lane runs the same whichever model
 its person's session is on. Several drivers can share one checkout: each works only
-its own items, in worktrees and branches named by ref. Mark `ready` what is ready, and say which `ready_blockers` a person must clear before a lane's
-driver can start the rest — `start.sh` refuses those, and you say so rather than
-hoping.
+its own items, in worktrees and branches named by ref. Mark `ready` what is ready, and say which `ready_blockers` a lane's item still carries — `start.sh` starts it anyway, printing them as warnings and recording them on the session, and the lane's driver should know what it is starting without.
 
 A lane a driver has started is read once, at its start. To move an item that has
 not been started, rewrite both lane files and tell the driver, by a message to

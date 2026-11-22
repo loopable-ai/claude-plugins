@@ -3,8 +3,8 @@
 #
 #   start.sh <item id | ref | next>
 #
-# Pull the item's brief pack; refuse anything that is not `ready` and say what
-# is missing; make the worktree from `origin/main`; report `in_progress`; open
+# Pull the item's brief pack; refuse an item somebody else is on or that is
+# finished; warn, never refuse, about what the brief lacks; make the worktree from `origin/main`; report `in_progress`; open
 # the session; print the pack.
 #
 # WHY A SCRIPT AND NOT A PROMPT. The command file beside this one
@@ -12,18 +12,17 @@
 # read what it printed. Every step below is a step that must happen in this
 # order, every time, whatever else is in the context — and a model asked to
 # remember six steps will one day do five of them, most likely dropping the
-# readiness refusal, which is the one with a person's judgement behind it. So
+# step that records what was known. So
 # the sequence is code and the model's part is the part that needs a model.
 #
 # A COMMAND IS NOT A HOOK, and everything about the failure discipline is
 # inverted here. A hook fails silently because nobody asked it to run; this was
 # asked for by name, and a person waiting for a worktree needs to be told when
 # there is no worktree. So: every failure prints a sentence and exits non-zero,
-# nothing is guessed at, and the readiness refusal is a refusal rather than a
-# warning. `--max-time` grows too (LOOPABLE_MAX_TIME in lib.sh) — waiting eight
+# nothing is guessed at. `--max-time` grows too (LOOPABLE_MAX_TIME in lib.sh) — waiting eight
 # seconds for a sleeping database is fine for a command somebody typed.
 #
-# ORDER MATTERS, and it is: read, refuse, create, claim, open. The claim comes
+# ORDER MATTERS, and it is: read, refuse the collision, create, claim, open. The claim comes
 # AFTER the worktree because an item reported `in_progress` with no branch
 # under it is a lie the console shows to everyone; the session comes after the
 # claim because a session is opened on work somebody has taken.
@@ -110,19 +109,28 @@ NOTE=$(field '.item.status_note')
 REF=$(field '.item.ref')
 [ -n "$ITEM_ID" ] || die "The pack carries no item id. Nothing has been created or reported."
 
-# ------------------------------------------------------------ 2. the refusal --
+# ----------------------------------------- 2. what is refused, what is warned --
 #
-# READY IS A DECISION SOMEBODY ELSE TOOK. api/lib/readiness.mjs is three
-# queries and no model, and the whole value of that determinism is that the
-# things downstream lean on it rather than re-deciding. So this refuses, and it
-# refuses by printing the blockers the pack already carries: an agent that
-# started anyway would be building to a brief nobody can check.
-blocker_sentence() { # the words web/src/locales/en.json shows, for the same code
+# READINESS IS A REPORT, NOT A GATE (411). api/lib/readiness.mjs says what is
+# missing from an item — no brief, a criterion with no verify method, an
+# environment its browser or http criteria need — and the pack already carries
+# it as `ready_blockers`. Nothing here refuses because of it: the blockers are
+# printed as warnings, and recorded on the session this run opens (section 6),
+# so the record shows what was known when the work began. Loopable is a tracker
+# and a shared channel; a person or an agent who starts an item has decided to.
+#
+# WHAT STAYS REFUSED is a different question, the collision rather than the
+# brief: an item somebody is already on (in_progress, in_review, verifying), one
+# parked on somebody (blocked, awaiting_input), and one finished or dropped.
+# Only `todo` and `ready` start.
+blocker_sentence() { # the same sentences as web/src/locales/en.json, for the same code
   case "$1" in
+    no_brief)
+      printf 'No brief has been written for it yet, so nobody has said what done means.' ;;
     no_verifiable_criterion)
       printf 'No acceptance criterion says how it would be checked, so there is nothing to verify against.' ;;
     no_environment)
-      printf 'No environment is registered for this project, so there is nowhere to try anything.' ;;
+      printf 'A browser or http criterion needs an environment to run against, and none is registered for this project — register one.' ;;
     no_cast)
       printf 'No cast has been compiled for this project yet, so nobody would run through it.' ;;
     # A code this plugin has not learned yet is still an answer, and printing it
@@ -131,29 +139,33 @@ blocker_sentence() { # the words web/src/locales/en.json shows, for the same cod
   esac
 }
 
-if [ "$STATUS" != ready ]; then
-  say "Not ready: $(loopable_safe "$TITLE") is \`$STATUS\`."
+if [ "$STATUS" != ready ] && [ "$STATUS" != todo ]; then
+  say "Not started: $(loopable_safe "$TITLE") is \`$STATUS\`."
   say
-  BLOCKERS=$(printf '%s' "$PACK" | jq -r '.item.ready_blockers[]?' 2>/dev/null)
-  if [ -n "$BLOCKERS" ]; then
-    say "What is missing:"
-    while IFS= read -r b; do [ -n "$b" ] && say "  · $(blocker_sentence "$b")"; done <<EOF
-$BLOCKERS
-EOF
-  elif [ "$STATUS" = in_progress ] || [ "$STATUS" = in_review ] || [ "$STATUS" = verifying ]; then
+  if [ "$STATUS" = in_progress ] || [ "$STATUS" = in_review ] || [ "$STATUS" = verifying ]; then
     say "Somebody is already on it. Two agents on one item is the collision the worktree"
     say "rule exists to prevent — take a different item, or ask whoever holds this one."
   elif [ "$STATUS" = blocked ] || [ "$STATUS" = awaiting_input ]; then
     say "It is parked, waiting on somebody. Answer what it is waiting for first."
   else
-    say "Nothing has judged it ready yet — grooming runs on the clock and writes the"
-    say "reasons into the item. Ask the product owner to groom it, or give it acceptance"
-    say "criteria and the project an environment."
+    say "It is \`$STATUS\`, so there is nothing to start."
   fi
   [ -n "$NOTE" ] && { say; say "The backlog's own note: $(loopable_safe "$NOTE")"; }
   say
   say "Nothing has been created and nothing has been reported."
   exit 1
+fi
+
+# THE WARNINGS, kept for the pack's own output and for the session's record.
+BLOCKERS=$(printf '%s' "$PACK" | jq -r '.item.ready_blockers[]?' 2>/dev/null)
+WARNINGS=""
+if [ -n "$BLOCKERS" ]; then
+  while IFS= read -r b; do
+    [ -n "$b" ] && WARNINGS="${WARNINGS}${WARNINGS:+
+}  · $(blocker_sentence "$b")"
+  done <<BLK
+$BLOCKERS
+BLK
 fi
 
 # -------------------------------------------------------------- 3. the slug --
@@ -247,8 +259,8 @@ else
   CMD=""
 fi
 
-# ALREADY STANDING. The item is `ready` — the refusal above saw to that — so
-# nobody has claimed it, and a worktree on its branch is a start that died
+# ALREADY STANDING. The item is `todo` or `ready` — the refusal above saw to
+# that — so nobody has claimed it, and a worktree on its branch is a start that died
 # before the claim, or one somebody cut by hand: what it lacks is the claim and
 # the session, and those are made below. A branch with NO worktree on it is
 # still refused: there is nothing to reuse, and putting a checkout on a branch
@@ -262,7 +274,7 @@ been created or reported. Put a worktree on it (git worktree add <path> $BRANCH)
 start again, or delete the branch if nothing on it is wanted."
   # LISTED IS NOT THERE. A worktree whose directory was deleted by hand stays in
   # git's list, marked prunable, with its path; reusing it would claim the item
-  # with no checkout under it, and a claimed item is not `ready` to restart. So
+  # with no checkout under it, and a claimed item is not startable again. So
   # the path has to be a checkout, and on this branch.
   [ -d "$WORKTREE" ] &&
     [ "$(git -C "$WORKTREE" symbolic-ref --quiet --short HEAD 2>/dev/null)" = "$BRANCH" ] || die \
@@ -442,7 +454,7 @@ fi
 # no branch named is an item somebody has to go and ask about.
 #
 # A CLAIM THAT FAILS takes back the worktree this run made, when nothing on it
-# would be lost, so that `ready` in the backlog is true of the repository too.
+# would be lost, so that the backlog's status is true of the repository too.
 # Either way the way on is to run it again once the backlog answers. The
 # sentence says only what is true of THIS run: a reused worktree stands and is
 # reused again; one this run made is accounted for by the lines undo prints.
@@ -456,14 +468,14 @@ else
   AGAIN="Run this again once the backlog answers."
 fi
 loopable_patch "/agent/projects/$PROJECT/items/$ITEM_ID" "$CLAIM" >/dev/null || fail \
-  "Reporting \`in_progress\` failed — the backlog still shows this item as \`ready\`, and
+  "Reporting \`in_progress\` failed — the backlog still shows this item as \`$STATUS\`, and
 another agent may take it. $AGAIN"
 
 # ----------------------------------------------------------- 6. the session --
 #
 # The same payload session-start.sh posts, for the same reason it posts it: the
 # console and the stall detector want a harness at work on a branch. It opens
-# rather than resumes because the item was `ready` a moment ago: nobody had
+# rather than resumes because the item was `$STATUS` a moment ago: nobody had
 # claimed it, so nobody should hold a session on it — a reused worktree is a
 # start that never got this far. If one is open anyway the API refuses the open,
 # this says the session could not be opened, and the SessionStart hook in that
@@ -482,6 +494,14 @@ if [ -n "$SESSION" ]; then
   # is what would otherwise happen, since the state is per-worktree and this
   # process is standing somewhere else.
   GITDIR=$(git -C "$WORKTREE" rev-parse --absolute-git-dir 2>/dev/null) || GITDIR=""
+  # WHAT WAS KNOWN WHEN WORK BEGAN (411): the blockers, as ONE activity on the
+  # session just opened, so the record shows them beside everything after.
+  if [ -n "$WARNINGS" ]; then
+    loopable_post_activity "$PROJECT" "$SESSION" action \
+      "Started with readiness warnings (nothing refused them):
+$WARNINGS" ||
+      say "The readiness warnings could not be recorded on the session."
+  fi
   if [ -n "$GITDIR" ] && mkdir -p "$GITDIR/loopable" 2>/dev/null; then
     printf '%s' "$ITEM_ID" > "$GITDIR/loopable/item"
     printf '%s' "$SESSION" > "$GITDIR/loopable/session"
@@ -508,6 +528,11 @@ say "  worktree  $WORKTREE${REUSED:+ (reused)}"
 say "  session   ${SESSION:-none}"
 say "  status    in_progress (reported)"
 say
+if [ -n "$WARNINGS" ]; then
+  say "Warning — started anyway; what is missing:"
+  say "$WARNINGS"
+  say
+fi
 
 ASK=$(field '.item.ask'); BODY=$(field '.item.body')
 if [ -n "$ASK" ]; then say "The ask"; say "$ASK"; say; fi

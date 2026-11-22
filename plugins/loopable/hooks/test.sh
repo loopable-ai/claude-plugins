@@ -1892,6 +1892,14 @@ pack_blocked() { cat > "$STUB_PACK" <<JSON
  "environments":[],"pack_bytes":300,"truncated":false,"trimmed":[]}}
 JSON
 }
+pack_in_status() { cat > "$STUB_PACK" <<JSON
+{"pack":{"item":{"id":"$TODO","kind":"story","title":"Somebody has this",
+  "ask":"","body":"","status":"$1","status_note":"",
+  "brief_rev":1,"ready_blockers":[]},
+ "criteria":[],"neighbourhood":{"nodes":[],"edges":[]},"decisions":[],
+ "environments":[],"pack_bytes":300,"truncated":false,"trimmed":[]}}
+JSON
+}
 start_items() { cat > "$STUB_ITEMS" <<JSON
 {"items":[
  {"id":"$READY","status":"ready","title":"$READY_TITLE","ref":"41"},
@@ -1941,17 +1949,17 @@ check "and says so"                    1 "$(printf '%s\n' "$OUT" | grep -c 'Noth
 check "creating no worktree"           "$BEFORE" "$(worktrees)"
 check "and reporting nothing"          0 "$(sent PATCH '/items/')"
 
-pack_blocked
-run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
-check "an item that is not ready — exits non-zero" 1 "$RC"
-check "the refusal names the status"   1 "$(printf '%s\n' "$OUT" | grep -c 'Not ready')"
-# THE BLOCKERS ARE THE ANSWER. A refusal that says only "not ready" sends the
-# reader back to the console to find out what is missing.
-check "and the first blocker, in words" 1 "$(printf '%s\n' "$OUT" | grep -c 'nothing to verify against')"
-check "and the second"                  1 "$(printf '%s\n' "$OUT" | grep -c 'nowhere to try anything')"
-check "no worktree"                     "$BEFORE" "$(worktrees)"
-check "no progress report"              0 "$(sent PATCH '/items/')"
-check "and no session"                  0 "$(sent POST '/sessions')"
+# WHAT STAYS REFUSED (411): the collision, not the brief. An item somebody is on
+# is refused, and a finished one; only todo and ready start.
+for ST in in_progress in_review verifying blocked done dropped; do
+  pack_in_status "$ST"
+  run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+  check "an item that is $ST — exits non-zero" 1 "$RC"
+  check "  naming the status"      1 "$(printf '%s\n' "$OUT" | grep -c "Not started.*$ST")"
+  check "  no worktree"            "$BEFORE" "$(worktrees)"
+  check "  no progress report"     0 "$(sent PATCH '/items/')"
+  check "  and no session"         0 "$(sent POST '/sessions')"
+done
 
 pack_ready
 run_start deadbeef-none >/dev/null; OUT=$(cat "$STUB/out")
@@ -2007,9 +2015,31 @@ check "the decisions that govern it"        1 "$(printf '%s\n' "$OUT" | grep -c 
 check "somewhere to point"                  1 "$(printf '%s\n' "$OUT" | grep -c 'loopable.ai')"
 check "and where the work now is"           1 "$(printf '%s\n' "$OUT" | grep -cF "Open a new session in $WT")"
 
+# READINESS IS A REPORT, NOT A GATE (411). A todo item that carries blockers
+# starts: the worktree, in_progress, the session — and the blockers are printed
+# as warnings and posted as ONE activity on the session it opened.
+pack_blocked
+BEFORE=$(worktrees)
+run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "a todo item with blockers starts — exits 0"   0 "$RC"
+check "a worktree was made for it"                   "$((BEFORE + 1))" "$(worktrees)"
+check "reported in_progress"                         1 "$(awk -F'\t' '$1 == "PATCH"' "$STUB_CALLS" | grep -c '"status":"in_progress"')"
+check "the session is opened"                        1 "$(sent POST '/sessions$')"
+check "the output says it started anyway"            1 "$(printf '%s\n' "$OUT" | grep -c 'started anyway')"
+check "and the first blocker, in words"              1 "$(printf '%s\n' "$OUT" | grep -c 'nothing to verify against')"
+check "and the second"                               1 "$(printf '%s\n' "$OUT" | grep -c 'needs an environment to run against')"
+check "the blockers are posted as one activity"      1 "$(sent POST '/sessions/s-new/activities$')"
+AB=$(grep 'activities' "$STUB_CALLS" | tail -1 | cut -f3)
+check "  naming the first blocker"                   1 "$(printf '%s' "$AB" | grep -c 'nothing to verify against')"
+check "  and the second"                             1 "$(printf '%s' "$AB" | grep -c 'needs an environment to run against')"
+# Takes its worktree back out so what follows starts as it did.
+git -C "$SRT" worktree remove --force "$(wt_of "story/nobody-has-groomed-this-${TODO%%-*}")" 2>/dev/null
+git -C "$SRT" branch -D "story/nobody-has-groomed-this-${TODO%%-*}" >/dev/null 2>&1
+pack_ready
+
 # STARTING IT AGAIN FINISHES WHAT IS THERE (359). Two agents on one item is
-# caught by the readiness refusal — a claimed item is `in_progress`, not
-# `ready`. An item still `ready` with its branch and worktree standing is a start
+# caught by the status refusal — a claimed item is `in_progress`, not
+# `todo` or `ready`. An item still startable with its branch and worktree standing is a start
 # that died half-way, or a worktree somebody cut by hand: what is missing is the
 # claim and the session, and refusing would be a wall where a helper belongs.
 rm -f "$NDIR/item" "$NDIR/session"

@@ -315,7 +315,7 @@ A state says where an item is right now — not how good it is, and not whose
 fault anything is.
 
 - **todo** — nobody has started; it may not even be fit to start.
-- **ready** — groomed: criteria somebody could act on, and somewhere to run it.
+- **ready** — groomed: criteria somebody could act on, and somewhere to run them where a criterion needs one. Readiness is a report on the item, not a gate.
 - **in_progress** — somebody or something is working on it.
 - **in_review** — the work is written and a person has to read it.
 - **verifying** — merged, and waiting on the deploy: a criterion only the
@@ -335,10 +335,10 @@ reaches. Loopable is a tracker and a shared channel, and the developer works in
 Claude Code or any other tool; the trail is the record. Every move lands in the
 item's trail naming the person and, for a token, the token it came through, so a
 move a token made never reads as the person's click. A client never writes the
-backlog, and the edges that are the client's own stay theirs. One condition
-still rides a token's `ready`: nothing missing for the item to be ready — a
-brief written, a criterion that says how it will be checked, somewhere to run
-it. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
+backlog, and the edges that are the client's own stay theirs. Readiness
+(a brief written, a criterion that says how it will be checked, an environment
+for a browser or http criterion) is reported on the item as warnings and refuses
+no edge and no start. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
 
 ## The rank rule
 

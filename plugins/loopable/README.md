@@ -317,7 +317,7 @@ want adversarial review every time they change, not once.
 One command, and it is `bin/start.sh` — the command file is four lines telling
 Claude to run the script and read what it printed. **All of the sequence is in
 the script and none of it is in the prose**, because a model asked to remember
-six steps will one day do five, and the step it drops is the readiness refusal:
+six steps will one day do five, and the step it drops is recording what was missing:
 the one with a person's judgement behind it.
 
 In order, every time:
@@ -326,11 +326,12 @@ In order, every time:
    item nobody is on; anything else is resolved through the same `lib.sh` pair
    the merge guard uses, so a full id and a short id mean the same thing here as
    they do there.
-2. **Refuse anything that is not `ready`**, and print the blockers the pack
-   carries as sentences. `ready` is three deterministic queries somebody else
-   already ran; leaning on that answer is the whole reason it is deterministic.
-   An item already in progress is refused with the reason a person needs — two
-   agents on one item is the collision the worktree rule exists to prevent.
+2. **Warn about readiness, refuse the collision.** The blockers the pack
+   carries are printed as warnings and posted as one activity on the session
+   the start opens, so the record shows what was known when work began; nothing
+   is refused for them. Only `todo` and `ready` items start: one already in
+   progress is refused with the reason a person needs — two agents on one item
+   is the collision the worktree rule exists to prevent.
 3. **Make the worktree from `origin/main`.** With a `start:` line in
    `.loopable.yaml` that command is RUN, placeholders filled in (`<type>`,
    `<kind>`, `<slug>`, `<shortid>`) — re-implementing it would create branches
@@ -544,7 +545,7 @@ probe, a release tag `AGENTS.md` names — and destructive or production-data
 writes stay the person's to run.
 
 **It drives the same machinery a person does, and adds none.** `start.sh` still
-refuses an item that is not `ready`, the close contract is still written by
+refuses an item another session holds, the close contract is still written by
 `ship.sh` from two reports the builder never touched, and the merge guard still
 refuses a failed or a moved head and records every other merge it lets through
 as `guard_allowed` — which the driver reads and never takes for a pass: it
@@ -599,7 +600,7 @@ is told.
 **The token takes any edge.** A studio token moves any item it reaches to any
 status on the driver's own judgement — `ready`, `verifying`, `done` and
 `dropped` included. The trail names the person and the token for each move;
-that record is the control. `start.sh` still refuses an item that is not ready.
+that record is the control. `start.sh` starts an item with blockers and records them.
 
 **It never edits.** The lead that writes code stops judging it, so every change
 is a `builder`'s, one per item, in that item's worktree — or, once escalated,
