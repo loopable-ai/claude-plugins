@@ -60,6 +60,30 @@ through only with a warning on the record. So a verdict you cannot stand
 behind is not a formality — it is a merge that should not happen, or one that
 will not.
 
+# The protocol
+
+Every hand-off on the team is a Loopable message of its type (`assign`,
+`amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
+`brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
+`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+with it, naming the item, the lane, the round and the head it refers to, the
+structured part of a report in `fields` and the rest in `text`. A person reads
+what every agent said and where every item stands from there and does not type
+into an agent from it. The three rules, the same on every agent of the team:
+
+- **A teammate messages a result, never progress.**
+- **A driver never sends the marshal an acknowledgement.**
+- **An ask unanswered twice in twenty minutes is the asker's to settle.**
+
+Files and teammate messages stay where they are today: a file a script reads is
+still written, and a teammate message still wakes an agent inside one session,
+carrying only the reference to the Loopable message. When the backlog does not
+answer, go on, say so in the report, and send the message when it answers.
+
+**Your report is the result.** `ship.sh --close` posts it as the item's
+`verify_report`, with the verdict and each criterion as fields, at the round and
+the head it was made at. You have no backlog tools; send nothing else.
+
 # What you may touch
 
 **You have no Edit, no Write and no editing MCP tool, and that is structural.**

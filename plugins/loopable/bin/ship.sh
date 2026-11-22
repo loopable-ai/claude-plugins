@@ -555,7 +555,7 @@ findings() {
   # The reviewer's own last word, which is a line in its report. Grepped
   # rather than parsed: the report is for people, and only this one line has
   # to be machine-readable.
-  grep -iE '^[[:space:]]*(ship|hold)\b' "$REVIEW_MD" | head -1 |
+  grep -iE '^[[:space:]]*(ship|hold)[[:space:]]+—' "$REVIEW_MD" | tail -1 |
     sed -E 's|^[[:space:]]*||' | awk 'NF {print "Verdict: " $0}'
 }
 
@@ -712,6 +712,50 @@ else
   say "Fix the refusal above and run /loopable:ship again — the second run finds the" >&2
   say "same pull request and closes with it." >&2
 fi
+say
+
+# ------------------------------------------------- the reports, as messages --
+#
+# THE HAND-OFF IS A MESSAGE LOOPABLE HOLDS (436): the verify report and the
+# review report this script already gathered are posted on the item's thread,
+# to the driver, naming the round and the head they are about, so a person
+# reads them from Loopable and not from a machine's files. The files, the
+# attachments and the pull request comment stay — nothing reads the message
+# instead of them yet.
+#
+# A FAILURE TO POST IS PRINTED AND NEVER FAILS THE SHIP: the close above is the
+# record that matters, and a backlog that cannot take a message right now must
+# not turn a verified run into a red one. The round is the rounds already
+# copied under the state directory, plus this one.
+ROUND=$(find "$STATE/rounds" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+ROUND=$(( ${ROUND:-0} + 1 ))
+post_message() { # post_message <type> <from_role> <fields json> <text file>
+  local payload out text=""
+  [ -r "$4" ] && text=$(head -c 100000 "$4")
+  payload=$(jq -nc --arg t "$1" --arg fr "$2" --arg item "$ITEM" --arg head "$HEAD_SHA" \
+    --argjson round "$ROUND" --argjson fields "$3" --arg text "$text" --arg s "$SESSION" \
+    '{type: $t, from_role: $fr, to_role: "driver", item_id: $item, round: $round,
+      head_sha: $head, from_session_id: $s, fields: $fields, text: $text}') || {
+      say "  ! the $1 message could not be built — not sent" >&2; return 0; }
+  out=$(api POST "/agent/projects/$PROJECT/messages" "$payload") || {
+    say "  ! the $1 message was not posted ($(api_message "$out")) — the ship goes on" >&2; return 0; }
+  say "  · $1 posted on the item's thread, round $ROUND"
+}
+say "Posting the reports as messages on $ITEM"
+post_message verify_report verifier \
+  "$(jq -nc --arg v "$VERDICT" --arg r "$REASON" --argjson c "$CRITERIA" \
+     '{verdict: $v, reason: $r, criteria: $c}')" "$VERIFY_MD"
+REVIEW_VERDICT=$(grep -iE '^[[:space:]]*(ship|hold)[[:space:]]+—' "$REVIEW_MD" 2>/dev/null | tail -1 |
+  sed -E 's|^[[:space:]]*||')
+# The findings by severity: each "- [blocking|should|nit] <where>: ..." line of
+# the report, grouped under its tag, so a person and the driver read them as
+# data and not from the prose.
+FINDINGS=$(sed -nE 's/^[[:space:]]*-[[:space:]]*\[(blocking|should|nit)\][[:space:]]*(.*)$/\1\t\2/p' "$REVIEW_MD" 2>/dev/null |
+  jq -Rsc '{blocking: [], should: [], nit: []} as $z
+    | reduce (split("\n")[] | select(length > 0) | split("\t")) as $r ($z; .[$r[0]] += [$r[1]])')
+[ -n "$FINDINGS" ] || FINDINGS='{"blocking":[],"should":[],"nit":[]}'
+post_message review_report reviewer \
+  "$(jq -nc --arg v "$REVIEW_VERDICT" --argjson f "$FINDINGS" '{verdict: $v, findings: $f}')" "$REVIEW_MD"
 say
 
 

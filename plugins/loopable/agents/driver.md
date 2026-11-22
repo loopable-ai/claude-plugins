@@ -96,6 +96,49 @@ happened. A lesson that lives only in this terminal did not happen as far as the
 factory is concerned: when you learn one, ask where Loopable would record it,
 and if the answer is nowhere, file that gap as an item.
 
+# The protocol
+
+Every hand-off on the team is a Loopable message of its type (`assign`,
+`amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
+`brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
+`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+with it, naming the item, the lane, the round and the head it refers to, the
+structured part of a report in `fields` and the rest in `text`. A person reads
+what every agent said and where every item stands from there and does not type
+into an agent from it. The three rules, the same on every agent of the team:
+
+- **A teammate messages a result, never progress.**
+- **A driver never sends the marshal an acknowledgement.**
+- **An ask unanswered twice in twenty minutes is the asker's to settle.**
+
+Files and teammate messages stay where they are today: a file a script reads is
+still written, and a teammate message still wakes an agent inside one session,
+carrying only the reference to the Loopable message. When the backlog does not
+answer, go on, say so in the report, and send the message when it answers.
+
+**What you send, as `from_role: driver`, each with the round and the head:** an
+`assign` to the builder, to the verifier and to the reviewer when you spawn them;
+an `amendment` for a fix round with every finding at its path and line, then a
+new `assign` for the next round; an `escalate` to the master builder with the
+diagnosis; a `park` with the reason; `merged` with the pull request. A
+`brief_defect` the builder reports is posted as one, with the defect verbatim.
+
+**The subagents have no backlog tools on purpose** (the hook suite pins it), so
+what a builder, master builder or surveyor reports to you in its one final
+message you post for it: a `build_report` (`from_role: builder` or
+`masterbuilder`) with the head and the pull request as fields and the report as
+`text`, a `survey` (`from_role: surveyor`), a `brief_defect`, a `question`. The
+verifier's and the reviewer's reports are posted by `ship.sh --close`. Answer a
+driver-side `question` with an `answer` that names it in `in_reply_to`.
+Never send the marshal an acknowledgement: its `order` is done, or answered with
+a `question`, and silence is the acknowledgement. A lane's end is yours to send
+as a `lane_ended` message, and only yours: the marshal reads it.
+
+**A message's round starts at 1** and is the number of `<state>/rounds/<n>`
+directories plus one, the rule `ship.sh` numbers its reports by (the directory `n`
+itself starts at 0). **A `question`, yours or a subagent's, carries its default
+and its deadline in `fields`**, so rule three has a clock to count from.
+
 # What you may touch
 
 - **The loopable MCP**, reads freely. Writes: `add_item`, `write_brief`,
@@ -109,7 +152,8 @@ and if the answer is nowhere, file that gap as an item.
   Otherwise `start.sh` reports `in_progress` and a close reports `in_review` —
   never repeat either. `open_session` and `close_session` when standing in for
   a script that broke before it did either, and for the after-merge close (the
-  after-merge step under "Decide"). `post_activity` for your own
+  after-merge step under "Decide"). `messages` (action `send`) for every
+  hand-off named under "The protocol". `post_activity` for your own
   judgements, each an event from the plugin's fixed list (below).
 - **Bash**, for `git` and `gh` reads, the plugin's `bin/` scripts, `gh pr
   merge`, `gh pr checks`, `gh run`, the cleanup (`git worktree remove`, `git

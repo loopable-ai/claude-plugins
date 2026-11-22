@@ -180,6 +180,11 @@ case "$U" in
   */sessions/*/close)
     [ -s "${STUB_CLOSE_ERR:-/dev/null}" ] && answer "$(cat "$STUB_CLOSE_ERR")" "${STUB_CLOSE_CODE:-422}"
     answer '{"session":{"id":"s-1","state":"complete"}}' ;;
+  # A MESSAGE (436): ship.sh posts its two reports. STUB_MESSAGE_FAIL makes the
+  # backlog refuse one, which must never fail the ship.
+  */messages)
+    [ -n "${STUB_MESSAGE_FAIL:-}" ] && answer '{"message":"refused"}' 500
+    answer '{"message":{"id":"m-1"}}' 201 ;;
   */agent/whoami)  answer '{"projects":[{"id":"p-1"}]}' ;;
   */items)         answer "$(cat "$STUB_ITEMS")" ;;
   # The brief pack, under its two doors — BOTH BEFORE `*/items/*`, which would
@@ -2371,7 +2376,7 @@ report() { # report <verdict> <c1 status> <c2 status> [reason]
         check: "open the deployed pull request page and read its body"}]}' \
     > "$SDIR2/verify.json"
   printf '# Verification\n\nverdict %s\n' "$1" > "$SDIR2/verify.md"
-  printf '# Review\n\n## Verdict\nship — nothing blocking\n' > "$SDIR2/review.md"
+  printf '# Review\n\n## Findings\n- [should] a.sh:1: one\n- [nit] b.sh:2: two\n- [should] c.sh:3: three\n\nShip — an early line that is not the last word\n\n## Verdict\nship — nothing blocking\n' > "$SDIR2/review.md"
   mkdir -p "$SDIR2/evidence"; printf 'PNG' > "$SDIR2/evidence/pr.png"
 }
 
@@ -2580,6 +2585,40 @@ check "opened BEFORE the session closed" 1 \
 check "and the close carries its url"  https://github.com/wearewebera/sanfrancisco/pull/700 \
   "$(printf '%s' "$P" | jq -r '.pr_url')"
 check "the close line names it too"    1 "$(shipped | grep -c 'verdict pass, at https://github.com/')"
+# THE REPORTS AS MESSAGES (436): one verify_report and one review_report on the
+# item's thread, naming the round and the head.
+msgs() { awk -F'\t' '$1 == "POST" && $2 ~ /\/messages$/ {print $3}' "$STUB_CALLS"; }
+check "two messages posted"            2 "$(msgs | grep -c .)"
+check "a verify_report, from the verifier" "verify_report verifier" \
+  "$(msgs | jq -r 'select(.type == "verify_report") | .type + " " + .from_role')"
+check "its verdict and every criterion as fields" "pass 2" \
+  "$(msgs | jq -r 'select(.type == "verify_report") | .fields.verdict + " " + (.fields.criteria | length | tostring)')"
+check "a review_report, from the reviewer" "review_report reviewer" \
+  "$(msgs | jq -r 'select(.type == "review_report") | .type + " " + .from_role')"
+check "naming the item, the round and this head" "$SHIP_ITEM 1 $SHIP_HEAD" \
+  "$(msgs | jq -r 'select(.type == "verify_report") | .item_id + " " + (.round | tostring) + " " + .head_sha')"
+check "to the driver"                  driver "$(msgs | jq -r 'select(.type == "review_report") | .to_role')"
+check "the review verdict is the LAST verdict line" "ship — nothing blocking" \
+  "$(msgs | jq -r 'select(.type == "review_report") | .fields.verdict')"
+check "its findings by severity, as fields" "0 2 1" \
+  "$(msgs | jq -r 'select(.type == "review_report") | .fields.findings | "\(.blocking | length) \(.should | length) \(.nit | length)"')"
+# A FIX ROUND: with rounds/0 copied, the same ship names round 2.
+mkdir -p "$SDIR2/rounds/0"
+cp "$STUB_GH_CALLS" "$STUB/gh-calls.keep"; cp "$STUB_CALLS" "$STUB/calls.keep"
+report pass met met
+run_ship --close
+check "with rounds/0 present the messages name round 2" "2 2" \
+  "$(msgs | jq -r '.round' | tr '\n' ' ' | sed 's/ $//' | awk '{print $1" "$2}')"
+rm -rf "$SDIR2/rounds"
+cp "$STUB/gh-calls.keep" "$STUB_GH_CALLS"; cp "$STUB/calls.keep" "$STUB_CALLS"
+# A FAILURE TO POST IS PRINTED AND DOES NOT FAIL THE SHIP.
+cp "$STUB_GH_CALLS" "$STUB/gh-calls.keep"; cp "$STUB_CALLS" "$STUB/calls.keep"
+report pass met met
+STUB_MESSAGE_FAIL=1 run_ship --close
+check "a refused message does not fail the ship" 0 "$RC"
+check "and is printed"                 2 "$(shipped | grep -c 'message was not posted')"
+check "the session still closed"       1 "$(closed_payload | grep -c .)"
+cp "$STUB/gh-calls.keep" "$STUB_GH_CALLS"; cp "$STUB/calls.keep" "$STUB_CALLS"
 check "its body names the item, by ref" 1 "$(grep -c '^Loopable: 99' "$STUB_PR_SENT")"
 # A BODY IS WRITTEN ONCE AND OUTLIVES THE RUN (369): one this script opened on a
 # fail kept round 1's banner and unticked checklist after a later pass, since a
@@ -2911,6 +2950,14 @@ for a in verifier reviewer surveyor; do
   check "the $a lists its tools"     yes  "$([ -n "$T" ] && echo yes || echo no)"
   check "and no editor is among them" none \
     "$(printf '%s\n' "$T" | grep -xE 'Edit|Write|MultiEdit|NotebookEdit' | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+done
+# THE PROTOCOL RIDES IN EVERY PROMPT (436), in the same words.
+for a in driver builder masterbuilder verifier reviewer surveyor marshal; do
+  check "the $a carries the three rules of the protocol" none \
+    "$(for w in 'A teammate messages a result, never progress.' \
+         'A driver never sends the marshal an acknowledgement.' \
+         "An ask unanswered twice in twenty minutes is the asker's to settle."; do
+         grep -qF -- "$w" "$AGENTS/$a.md" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 done
 # THE DRIVER KEEPS ITS EDITORS. It leaves edits to builders by practice, not
 # by a denied list: `disallowedTools` on the driver reaches the agents it

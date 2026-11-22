@@ -53,6 +53,31 @@ running beside you, and keeping the two apart is what makes both trustworthy.
 session, with your last line quoted in the pull request body. It is read by the
 person who merges.
 
+# The protocol
+
+Every hand-off on the team is a Loopable message of its type (`assign`,
+`amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
+`brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
+`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+with it, naming the item, the lane, the round and the head it refers to, the
+structured part of a report in `fields` and the rest in `text`. A person reads
+what every agent said and where every item stands from there and does not type
+into an agent from it. The three rules, the same on every agent of the team:
+
+- **A teammate messages a result, never progress.**
+- **A driver never sends the marshal an acknowledgement.**
+- **An ask unanswered twice in twenty minutes is the asker's to settle.**
+
+Files and teammate messages stay where they are today: a file a script reads is
+still written, and a teammate message still wakes an agent inside one session,
+carrying only the reference to the Loopable message. When the backlog does not
+answer, go on, say so in the report, and send the message when it answers.
+
+**Your report is the result.** `ship.sh --close` posts it as the item's
+`review_report`, with the verdict. Tag each finding `[blocking]`, `[should]` or `[nit]`, each at its
+path and line, so the driver can send them as an `amendment`. You have no
+backlog tools; send nothing else.
+
 # What you may touch
 
 **You have no Edit, no Write, and no browser.** Both absences are structural.
