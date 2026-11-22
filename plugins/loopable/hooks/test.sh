@@ -3105,6 +3105,86 @@ check "the driver points at that list" 1 "$(grep -c 'driver-events\.md' "$AGENTS
 check "and names every event on it" none \
   "$(printf '%s\n' "$LISTED" | while read -r e; do
        [ -n "$e" ] && ! grep -q "\`$e\`" "$AGENTS/driver.md" && printf '%s ' "$e"; done | sed 's/ $//' | grep . || echo none)"
+# THE MARSHAL PLANS, THE DRIVERS FOLLOW (431). Ported from fountain's marshal:
+# it reads the backlog through the loopable MCP, never GitHub issues, writes
+# lanes, the board and the surveys under <main>/.loopable/marshal/ in
+# fountain's lane format, and ends by printing the command that starts each
+# lane's driver. It runs on the model its person picks, like the driver, and it
+# never builds, edits a tracked file or merges.
+MARSHAL="$AGENTS/marshal.md"
+check "agents/marshal.md is named marshal" marshal "$(fm "$MARSHAL" 2>/dev/null | sed -n 's/^name: //p')"
+check "and says when to use it" 1 "$(fm "$MARSHAL" 2>/dev/null | grep -c '^description: ')"
+check "and runs on the model its person chooses" inherit "$(fm "$MARSHAL" 2>/dev/null | sed -n 's/^model: //p')"
+check "it reads and files through the loopable MCP" none \
+  "$(for w in '`list_backlog`' 'titles_only' '`get_item`' '`pull_item`' '`ready_blockers`' \
+              '`add_item`' '`revise`' '`write_brief`' '`link_items`'; do
+       grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "and never through GitHub issues" none \
+  "$( [ -f "$MARSHAL" ] || { echo missing; exit; }
+     grep -oE 'gh (issue|label|api orgs)[a-z/ -]*|closingIssuesReferences|\.fountain/' "$MARSHAL" |
+       sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "it finds a pull request by the item's session or its branch" none \
+  "$(for w in 'pr_url' 'gh pr list --head <branch>'; do
+       grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "its lanes, board and surveys live under .loopable/marshal" none \
+  "$(for w in '<main>/.loopable/marshal/lanes/<name>.md' '<main>/.loopable/marshal/board.md' \
+              '<main>/.loopable/marshal/surveys/<ref>.md'; do
+       grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+# The lane template is the fenced block that opens with `# Lane <name>`.
+LANE_FMT=$(awk '/^# Lane <name>/ {f = 1} f && /^```$/ {f = 0} f' "$MARSHAL" 2>/dev/null)
+check "a lane keeps fountain's format, by ref" none \
+  "$(for w in '## Order' '## <ref> <title>' 'Status: ready' 'Budget:' 'Decisions:' 'Decided in advance:' \
+              'Merge:' 'Out of scope:' '## Stops' '## Other lanes'; do
+       printf '%s\n' "$LANE_FMT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "it sorts the work into fountain's five" none \
+  "$(for w in '**Ready:**' '**Waiting on an answer:**' '**Blocked:**' '**Too big:**' '**Not scoped:**'; do
+       grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "audits against AGENTS.md and the vocabulary, surveys the candidates" none \
+  "$(for w in 'AGENTS.md' 'vocabulary.md' '`loopable:surveyor`' 'nproc' 'share no files' 'in one go'; do
+       grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "and ends with each lane's driver command" 1 \
+  "$(grep -cF 'claude --model <model> --agent loopable:driver "Follow lane <name>"' "$MARSHAL" 2>/dev/null |
+       sed 's/^[1-9][0-9]*$/1/')"
+check "it never builds, edits a tracked file or merges" 1 \
+  "$(awk '/^\*\*You never:\*\*/ {f = 1} f' "$MARSHAL" 2>/dev/null | tr '\n' ' ' | tr -s ' ' |
+       grep -cF 'Brief, build, verify, review or merge' | sed 's/^[1-9][0-9]*$/1/')"
+check "and edits no tracked file" 1 \
+  "$(awk '/^\*\*You never:\*\*/ {f = 1} f' "$MARSHAL" 2>/dev/null | tr '\n' ' ' | tr -s ' ' |
+       grep -cF 'Edit, commit or push a tracked file' | sed 's/^[1-9][0-9]*$/1/')"
+# ITS FILES GO THROUGH A QUOTED HEREDOC, NEVER THE WRITE TOOL (431, round 1).
+# The marshal sits in <main> on main, and guard-main.sh denies every Edit or
+# Write there — an ignored path included — so a marshal told to Write its lane
+# writes nothing. Bash is not the guard's matcher, and a quoted delimiter keeps
+# the ask's text away from the shell, as the surveyor does.
+check "the marshal writes its files through a quoted heredoc, not Write" none \
+  "$( [ -f "$MARSHAL" ] || { echo missing; exit; }
+     { for w in "<<'MARSHAL_END_OF_FILE'" 'never `EOF`' 'guard-main.sh'; do
+         grep -qF -- "$w" "$MARSHAL" || printf '[%s] ' "$w"; done
+       grep -oiE '(with|through|use) the (Write|Edit) tool' "$MARSHAL" | sed 's/.*/[&] /' | tr -d '\n'
+     } | sed 's/ $//' | grep . || echo none)"
+# AND EACH SURVEYOR WRITES THE PATH IT WAS GIVEN (431, round 1): several run on
+# <main> at once, and the surveyor's own template computes <state>/survey.md,
+# which in <main> is one file every one of them would overwrite.
+SURVEY_SPAWN=$(awk 'BEGIN {RS = ""} index($0, "spawn `loopable:surveyor`")' "$MARSHAL" 2>/dev/null | tr '\n' ' ' | tr -s ' ')
+check "the marshal's surveyors write the path given, not the computed one" none \
+  "$(for w in '<main>/.loopable/marshal/surveys/<ref>.md' 'exactly that path' '$(git rev-parse --absolute-git-dir)/loopable/survey.md'; do
+       printf '%s' "$SURVEY_SPAWN" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "and the surveyor names the marshal as a caller" 1 \
+  "$(fm "$AGENTS/surveyor.md" 2>/dev/null | grep -c 'loopable:marshal' | sed 's/^[1-9][0-9]*$/1/')"
+check "every agent the marshal names exists" none \
+  "$( [ -f "$MARSHAL" ] || { echo missing; exit; }
+     grep -oE 'loopable:[a-z-]+' "$MARSHAL" | sort -u | sed 's/^loopable://' |
+       while read -r n; do
+         [ -f "$AGENTS/$n.md" ] || [ -f "$HERE/../commands/$n.md" ] ||
+           [ -f "$HERE/../skills/$n/SKILL.md" ] || printf 'loopable:%s ' "$n"
+       done | sed 's/ $//' | grep . || echo none)"
+# AND THE DRIVER FOLLOWS ONE: "Follow lane <name>" reads the marshal's lane file
+# as a planned batch, takes only its items and leaves the other lanes alone.
+LANE_STEP=$(awk '/^### A lane$/ {f = 1; next} /^##/ {f = 0} f' "$AGENTS/driver.md" 2>/dev/null | tr '\n' ' ' | tr -s ' ')
+check "the driver follows a lane as a planned batch" none \
+  "$(for w in 'Follow lane <name>' '<main>/.loopable/marshal/lanes/<name>.md' 'as a planned batch' \
+              'Take only its items' '`Other lanes`' 'worktrees, branches and pull requests'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 
 # --- the two version checks (335) -----------------------------------------
 echo

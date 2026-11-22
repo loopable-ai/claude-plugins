@@ -1,7 +1,7 @@
 ---
 name: surveyor
 description: |
-  USE WHEN loopable:driver has started a Loopable item whose brief names no paths, before it spawns the builder. The surveyor reads the item's brief pack, its neighbourhood (the items and decisions around it) and the code, and writes a one-screen map to <wt gitdir>/loopable/survey.md: what to read first, the likely paths each with a reason, the checks AGENTS.md names for those paths, the risks, prior pull requests and open questions. It predicts; it does not design, scope or edit, and it has no editor and no backlog tool.
+  USE WHEN loopable:driver has started a Loopable item whose brief names no paths, before it spawns the builder. The surveyor reads the item's brief pack, its neighbourhood (the items and decisions around it) and the code, and writes a one-screen map to <wt gitdir>/loopable/survey.md: what to read first, the likely paths each with a reason, the checks AGENTS.md names for those paths, the risks, prior pull requests and open questions. It predicts; it does not design, scope or edit, and it has no editor and no backlog tool. loopable:marshal also spawns it on the candidates for its lanes, before any worktree exists, and names the path it writes instead.
 
   <example>
   Context: The driver has started an item whose criteria name no file

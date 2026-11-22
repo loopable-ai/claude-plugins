@@ -7,10 +7,11 @@ for the three keys). From then on six hooks apply, each doing one mechanical
 thing — anything needing judgement is a skill, not a hook — plus two commands,
 which are the two ends of a piece of work (`/loopable:start` begins one,
 `/loopable:ship` finishes it), a planning skill, `/loopable:plan`, that asks
-every question for a batch before any of it is built, and six agents: the
+every question for a batch before any of it is built, and seven agents: the
 `verifier` and `reviewer` that ship runs, and the `driver`, `builder` and
 `masterbuilder` that run the commands for you, with the `surveyor` that maps the
-code for an item whose brief names no paths before its builder starts.
+code for an item whose brief names no paths before its builder starts, and the
+`marshal` that shares the ready work out into lanes, one per driver.
 
 | hook | event | |
 |---|---|---|
@@ -634,6 +635,37 @@ session, so `start_refused` is listed and not yet posted.
 and close contracts are what the next session reads. `test.sh` checks that every
 script and agent the driver's prose names exists, because prose does not fail
 when a script is renamed.
+
+## The marshal
+
+```
+claude --agent loopable:marshal
+```
+
+A session started as the marshal plans the work several drivers share. It reads
+the backlog through the loopable MCP — `list_backlog` with `titles_only` and a
+status filter, `get_item`, `pull_item` — audits every open item against
+`AGENTS.md` and the vocabulary, fixes what an agent may through `add_item`,
+`revise`, `write_brief` and `link_items`, and sorts what could be built into
+ready, waiting on an answer, blocked, too big and not scoped (an item's
+readiness is its brief and its `ready_blockers`). It asks the person every open
+question at once and records the answers on the briefs, as `/loopable:plan`
+does; runs `loopable:surveyor` on the candidates; and writes lanes whose items
+share no files, sized to the machine, then the board. Its files are under
+`<main>/.loopable/marshal/` — `lanes/<name>.md`, `board.md`, `surveys/` — which
+is ignored, so nothing of it is committed. It never builds, edits a tracked file
+or merges, and it ends by printing one command per lane:
+
+```
+claude --model <model> --agent loopable:driver "Follow lane <name>"
+```
+
+A driver started that way reads the lane as a planned batch, takes only its
+items, and leaves the other lanes' worktrees, branches and pull requests alone.
+Adapted from the marshal in Avanti Studio's fountain plugin, with the backlog in
+place of GitHub issues and the lane format kept; `test.sh` holds its frontmatter
+(`model: inherit`, like the driver's), its MCP reads, its paths, the lane format,
+the driver command and the driver's lane section.
 
 ## What it will not catch
 
