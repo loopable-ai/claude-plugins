@@ -42,10 +42,11 @@ directory `claude plugin eval` makes for the run. It builds:
   MCP's tools by their own names and arguments (the prompt substitutes it for the
   MCP), and as `curl`, the HTTP API `start.sh`, `ship.sh` and the hooks call. One
   state file, so both faces see one backlog. It keeps the API's refusals the
-  plugin is written around — an agent token cannot set `done`, or `ready` on an
-  item it did not file; a session closes once; a close from `verifying` needs every
-  criterion met — and logs every call, held or refused, as one flat line in
-  `backlog-events.jsonl`.
+  plugin is written around — a session closes once; a close from `verifying`
+  needs every criterion met — and logs every call, held or refused, as one flat
+  line in `backlog-events.jsonl`. Its edge table still models the rule from
+  before 410, which kept a token off some edges; the API now lets every studio
+  token take any edge, and bringing the stand-in up to date is its own item.
 - **The plugin under test**, copied in unmodified: `agents/driver.md` as
   `.loopable-eval/role.md`, and `bin/`, `hooks/`, `skills/` under
   `.loopable-eval/plugin/`. The case's prompt has the main session read the role

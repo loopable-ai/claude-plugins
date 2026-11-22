@@ -321,7 +321,7 @@ fault anything is.
 - **verifying** — merged, and waiting on the deploy: a criterion only the
   deploy can show is checked after the merge, and the item goes back to
   in_review once every criterion is met.
-- **done** — accepted by a person.
+- **done** — the work is accepted, by a person or by an agent acting for one, and the trail says who.
 - **blocked** — waiting on something else in the world.
 - **awaiting_input** — waiting on an answer from a person.
 - **dropped** — closed without being done: a duplicate, or something no longer
