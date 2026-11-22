@@ -199,8 +199,8 @@ Only now does anything get written, and only through the loopable MCP.
    none is written twice.
 3. **Readiness, through `report_progress`** with `ready` — on your own judgement,
    once the item's `ready_blockers` is empty (any studio token takes the edge,
-   and the trail names it). An item with blockers is refused: write what is
-   missing first, or say what is left.
+   and the trail names it). The edge is taken with blockers too, so say what is
+   missing, or what is left.
 4. **Hand the batch to the driver.** When your own instructions are the
    driver's (they open with "You are the driver"), run the ready items in the
    plan's order, from the main checkout. Otherwise tell the person to start

@@ -236,7 +236,7 @@ def session(n, ref, branch, closed=None, activities=()):
 def backlog_state(items, sessions, counter=100):
     return {'project': {'id': PROJECT, 'name': 'Shop'},
             'me': {'member_id': 'm-driver', 'name': 'fixture driver token'},
-            'token': {'agent': True, 'person_edges': False},
+            'token': {'agent': True},
             'items': {i['id']: i for i in items},
             'sessions': {s['id']: s for s in sessions},
             'links': [], 'drafts': [],

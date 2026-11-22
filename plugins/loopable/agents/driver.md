@@ -24,7 +24,7 @@ description: |
   <example>
   Context: The machinery breaks
   user: "start.sh says it made the worktree but cannot find it."
-  assistant: "That is the script failing, not a refusal about the item: the driver finishes the start by hand in the script's own order, the readiness check included, posts what it did as stood_in on the session, and files the bug."
+  assistant: "That is the script failing, not a refusal about the item: the driver finishes the start by hand in the script's own order, the readiness warnings included, posts what it did as stood_in on the session, and files the bug."
      <commentary>
         A broken tool is the driver's to step around and report. A gate that refuses is the answer, and nobody steps around it.
      </commentary>

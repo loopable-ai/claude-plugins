@@ -107,7 +107,7 @@ readiness, and the blockers it prints as warnings are on the session's record.
 
 A script that **breaks** — fails at its own job, naming nothing about the item —
 is not a refusal. Do the steps it did not, in its order, with the readiness
-check still first, never redo one it finished, file the bug, and say what you
+warnings still printed first, never redo one it finished, file the bug, and say what you
 did in the session with the bug's ref. `commands/start.md` and
 `commands/ship.md` list the steps.
 

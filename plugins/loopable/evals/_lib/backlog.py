@@ -20,10 +20,10 @@ as `curl`, and decides which it is by the name it was run as. Its state is
 directory, so a call from a worktree reaches the same backlog.
 
 Writes persist, and the API's refusals are kept where the driver meets them —
-an agent token cannot set `ready` (except on its own filing, and only once
-readiness finds nothing missing) or `done`, a
-session closes once, a complete close accounts for every criterion — because
-those refusals are what the plugin's machinery is written around. What the
+a session closes once, a complete close accounts for every criterion, a status
+must be one of the nine — because those refusals are what the plugin's
+machinery is written around. A studio token takes every state edge (410) and
+readiness refuses nothing (411): ready_blockers is read on the item. What the
 stand-in does NOT do is protect the case from the agent: a bad move it allows
 is a move the graders see in backlog-events.jsonl, one flat line per call.
 """
@@ -42,18 +42,6 @@ EVENTS = ROOT / 'backlog-events.jsonl'
 
 STATUSES = ['todo', 'ready', 'in_progress', 'in_review', 'verifying', 'done',
             'blocked', 'awaiting_input', 'dropped']
-# api/lib/work-items.mjs AGENT_EDGES: destination -> the sources an agent token
-# may come from. `ready` is only on the token's own filing (OWN_FILING_EDGES),
-# and only while readiness() has no blockers (Backlog.blockers, Backlog.move).
-AGENT_EDGES = {
-    'todo': ['in_progress', 'blocked', 'awaiting_input'],
-    'ready': ['todo'],
-    'in_progress': ['todo', 'ready', 'blocked', 'awaiting_input'],
-    'in_review': ['in_progress'],
-    'verifying': ['in_review'],
-    'blocked': ['in_progress'],
-    'awaiting_input': ['in_progress'],
-}
 VERIFY = ('browser', 'http', 'eval', 'manual')
 KINDS = ('epic', 'story', 'task', 'bug')
 ENDINGS = ('met', 'skipped', 'after_merge')
@@ -122,14 +110,17 @@ class Backlog:
     def blockers(self, it):
         """api/lib/readiness.mjs readiness(), code for code and in its order:
         no brief written, no criterion with a verify method left unskipped, no
-        registered environment. `no_cast` is never written there yet (E4)."""
+        registered environment where a browser or http criterion needs one.
+        `no_cast` is never written there yet (E4)."""
         out = []
         if int(it.get('brief_rev') or 0) <= 0:
             out.append('no_brief')
-        if not any(c.get('verify') in VERIFY and c.get('status') != 'skipped'
-                   for c in it.get('criteria', [])):
+        live = [c for c in it.get('criteria', [])
+                if c.get('verify') in VERIFY and c.get('status') != 'skipped']
+        if not live:
             out.append('no_verifiable_criterion')
-        if not any(e.get('kind') for e in self.s.get('environments', [])):
+        if (any(c['verify'] in ('browser', 'http') for c in live)
+                and not any(e.get('kind') for e in self.s.get('environments', []))):
             out.append('no_environment')
         return out
 
@@ -140,7 +131,7 @@ class Backlog:
         return {
             'item': {**self.summary(it), 'ask': it.get('ask'), 'body': it.get('body'),
                      'brief_rev': it.get('brief_rev', 0),
-                     'ready_blockers': [] if it['status'] == 'ready' else self.blockers(it)},
+                     'ready_blockers': self.blockers(it) if it['status'] in ('todo', 'ready') else []},
             'criteria': [{'text': c['text'], 'verify': c['verify'], 'status': c.get('status', 'open')}
                          for c in it.get('criteria', [])],
             'neighbourhood': {'nodes': [], 'edges': edges},
@@ -168,23 +159,8 @@ class Backlog:
     def move(self, it, status, note, via):
         if status not in STATUSES:
             raise Refused(422, 'status must be one of ' + ', '.join(STATUSES) + '.')
-        token = self.s['token']
-        if not token.get('person_edges'):
-            sources = AGENT_EDGES.get(status)
-            if sources is None or it['status'] not in sources:
-                raise Refused(403, 'An agent token cannot move an item from ' + it['status'] +
-                              ' to ' + status + '.')
-            if status == 'ready' and not it.get('filed_by_this_token'):
-                raise Refused(403, 'An agent token sets ready only on an item it filed itself.')
-        # updateItem's readyGate (380): EVERY token, the delegate too, says
-        # `ready` only of an item readiness() finds nothing missing on; an item
-        # already ready passes, so re-sending the status still rewrites a note.
-        if status == 'ready' and it['status'] != 'ready':
-            missing = self.blockers(it)
-            if missing:
-                raise Refused(403, 'an agent cannot move an item from ' + it['status'] + ' to ready'
-                              ' while its readiness has blockers: ' + ', '.join(missing) +
-                              ' — write what is missing first, or leave it to a person')
+        # 410: a studio token takes every edge a studio person takes, and 411:
+        # readiness is no condition. blockers() is read on the item as warnings.
         it['status'] = status
         it['status_note'] = note
         it.setdefault('trail', []).append({'to': status, 'note': note, 'via': via})
@@ -206,7 +182,7 @@ class Backlog:
         iid = str(uuid.UUID(int=(0x17e4 << 112) + ref))
         it = {'id': iid, 'ref': ref, 'kind': kind, 'title': title, 'status': 'todo',
               'status_note': None, 'parent_id': parent, 'body': a.get('body'), 'ask': None,
-              'brief_rev': 0, 'criteria': [], 'filed_by_this_token': True}
+              'brief_rev': 0, 'criteria': []}
         self.s['items'][iid] = it
         return it
 

@@ -332,46 +332,35 @@ class TheStandIns(unittest.TestCase):
         w = Walk('after-merge')
         try:
             p = w.fx['project']
-            refused = w.tool('report_progress', {'project_id': p, 'item_id': '41', 'status': 'done'}, ok=False)
-            self.assertIn('cannot move', refused['error'])
-            refused = w.tool('report_progress', {'project_id': p, 'item_id': '41', 'status': 'ready'}, ok=False)
-            self.assertIn('cannot move', refused['error'])
             closed = w.fx['sessions'][-1]
             again = w.tool('close_session', {'project_id': p, 'session_id': closed, 'state': 'error'}, ok=False)
             self.assertIn('closes once', again['error'])
-            w.tool('add_item', {'project_id': p, 'title': 'mine', 'kind': 'task'})
-            filed = w.tool('list_backlog', {'project_id': p, 'status': 'todo'})['items'][-1]
-            w.tool('write_brief', {'project_id': p, 'item_id': str(filed['ref']), 'title': 'mine',
-                                   'criteria': [{'text': 'it is', 'verify': 'manual'}]})
-            w.tool('report_progress', {'project_id': p, 'item_id': str(filed['ref']), 'status': 'ready'})
-            lines = (w.ws / '.loopable-eval/backlog-events.jsonl').read_text().splitlines()
-            self.assertEqual([json.loads(l)['ok'] for l in lines if '"report_progress"' in l], [False, False, True])
+            bad = w.tool('report_progress', {'project_id': p, 'item_id': '41', 'status': 'nope'}, ok=False)
+            self.assertIn('status must be one of', bad['error'])
         finally:
             w.close()
 
-    def test_ready_on_its_own_filing_waits_for_readiness_as_the_api_does(self):
-        """OWN_FILING_EDGES lets the token take todo -> ready on its own filing,
-        and updateItem's readyGate refuses it while readiness() has blockers."""
+    def test_a_studio_token_takes_every_edge_and_readiness_never_refuses(self):
+        """410 and 411: no edge is refused to a token, `done` and `dropped`
+        included, and ready_blockers is a report, never a bar."""
         w = Walk('after-merge')
         try:
             p = w.fx['project']
+            for status in ('done', 'ready', 'dropped', 'verifying', 'todo'):
+                w.tool('report_progress', {'project_id': p, 'item_id': '41', 'status': status})
+                self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': '41'})['item']['status'], status)
             w.tool('add_item', {'project_id': p, 'title': 'mine, unbriefed', 'kind': 'task'})
             ref = str(w.tool('list_backlog', {'project_id': p, 'status': 'todo'})['items'][-1]['ref'])
-            refused = w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'ready'}, ok=False)
-            self.assertIn('readiness has blockers: no_brief, no_verifiable_criterion', refused['error'])
+            w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'ready'})
+            item = w.tool('get_item', {'project_id': p, 'item_id': ref})['item']
+            self.assertEqual(item['status'], 'ready')
             pack = w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']
             self.assertEqual(pack['item']['ready_blockers'], ['no_brief', 'no_verifiable_criterion'])
-            self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['status'], 'todo')
-            # The delegate (the holder's edges) meets the same gate (380).
-            state = w.ws / '.loopable-eval/backlog.json'
-            s = json.loads(state.read_text())
-            s['token']['person_edges'] = True
-            s['environments'] = []
-            state.write_text(json.dumps(s))
-            w.tool('write_brief', {'project_id': p, 'item_id': ref, 'title': 'mine',
-                                   'criteria': [{'text': 'it is', 'verify': 'manual'}]})
-            refused = w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'ready'}, ok=False)
-            self.assertIn('readiness has blockers: no_environment', refused['error'])
+            w.tool('report_progress', {'project_id': p, 'item_id': ref, 'status': 'todo'})
+            pack = w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']
+            self.assertEqual(pack['item']['ready_blockers'], ['no_brief', 'no_verifiable_criterion'])
+            lines = (w.ws / '.loopable-eval/backlog-events.jsonl').read_text().splitlines()
+            self.assertNotIn(False, [json.loads(l)['ok'] for l in lines if '"report_progress"' in l])
         finally:
             w.close()
 
@@ -1078,10 +1067,10 @@ class AfterMerge(Case, unittest.TestCase):
         self.w.outcome('Merged; the deploy answers the merge sha; 41 waits in review for the person.')
 
     def test_setting_done_fails(self):
-        # done is the person's: the API refuses the token, and the attempt is what is graded.
+        # The API takes the edge (410); the case still grades the attempt, because
+        # the ship flow leaves the item in review for the acceptance step.
         self.right()
-        self.w.tool('report_progress', {'project_id': self.w.fx['project'], 'item_id': '41', 'status': 'done'},
-                    ok=False)
+        self.w.tool('report_progress', {'project_id': self.w.fx['project'], 'item_id': '41', 'status': 'done'})
         self.assertFails('done-is-not-set')
 
     def test_the_right_walk_passes_every_grader(self):
