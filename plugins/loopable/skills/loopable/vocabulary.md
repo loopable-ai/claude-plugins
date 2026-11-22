@@ -328,24 +328,17 @@ fault anything is.
   worth doing.
 
 The first six are a road and the last three are places to stand. Who may take
-which step is not the same question: a person may take any of them, and an
-agent may report its way to `in_review`. It says `verifying` only of an item
-in review, when it merges it, and brings it back to `in_review` only by
-closing a session with every criterion met — the close after the deploy; it
-does not accept what it built. It grooms only
-what it filed itself: an agent sets `ready` only on an item it filed itself,
-through the same token, from `todo`, and only once nothing is missing for the
-item to be ready; anything a person or another token filed is groomed by a
-person. The other exception is a person's own: whoever mints an
-agent token may choose, then, to let it set `ready`, `verifying` and `done`
-for them. Those moves are still the person's — the trail names them and the
-token they came through — and the agent makes one only when the person asks
-for it, naming the items, never on its own judgement. Nothing else changes:
-such a token still never drops an item, it reaches only what its
-membership reaches, and like every token it sets `ready` only once nothing is
-missing for the item to be ready — a brief written, a criterion that says how
-it will be checked, somewhere to run it. A person setting `ready` by hand is
-not asked. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
+which step is not the same question, and the answer is: any studio caller may
+take any of them. A studio person and a studio token take every edge — `ready`,
+`verifying`, `done` and `dropped` included — on any item their membership
+reaches. Loopable is a tracker and a shared channel, and the developer works in
+Claude Code or any other tool; the trail is the record. Every move lands in the
+item's trail naming the person and, for a token, the token it came through, so a
+move a token made never reads as the person's click. A client never writes the
+backlog, and the edges that are the client's own stay theirs. One condition
+still rides a token's `ready`: nothing missing for the item to be ready — a
+brief written, a criterion that says how it will be checked, somewhere to run
+it. That table is `TRANSITIONS` in `api/lib/work-items.mjs`.
 
 ## The rank rule
 

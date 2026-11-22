@@ -34,7 +34,7 @@ describe reasoning; the backlog says what is left to do.
 | `revise` | fix an item's title or body. Not its visibility, kind or parent. |
 | `link_items` | this must be done before that |
 | `ask_studio` | a question a person has to answer, into the escalations inbox |
-| `report_progress` | `todo` / `in_progress` / `in_review` / `blocked` / `awaiting_input`, with one sentence about what happened. Not `ready`, `verifying` or `done` — those are a person's, save `verifying` from `in_review` at the merge of an item whose close left a criterion `after_merge`. A token its owner minted with the grant may set them, but only when that person asks in the session and names the items; without the grant the API refuses. |
+| `report_progress` | any status — `todo` / `ready` / `in_progress` / `in_review` / `verifying` / `done` / `blocked` / `awaiting_input` / `dropped` — with one sentence about what happened. Your move, on your judgement; the trail names the person and your token. `ready` still needs the item to have nothing missing. |
 
 `add_item` and `propose` are not two ways to do one thing. The line is **where
 the work came from**, not how much anybody is trusted: our own decided work
@@ -102,7 +102,7 @@ It refuses loudly rather than silently — a non-zero exit and a sentence — an
 refusal leaves nothing behind and reports nothing — what a failed start made, it
 takes back, and says so. When it refuses
 because the item is not ready, the blockers it prints are the answer: say them,
-rather than starting anyway, and the item starts once a person has cleared them.
+rather than starting anyway, and the item starts once they are cleared.
 
 A script that **breaks** — fails at its own job, naming nothing about the item —
 is not a refusal. Do the steps it did not, in its order, with the readiness
@@ -271,11 +271,11 @@ so there is no closed session to record it on.
 `/loopable:ship` is what puts a close on file, and `close_session` through the
 MCP is the same payload by hand for a session the command cannot reach. Either
 way a complete close moves the item to `in_review` — that is the report, and
-`report_progress` is not a substitute for it. `done` is a person accepting the
-work, and the API refuses it from a token. `verifying` is the deploy: a token
-takes it only from `in_review`, at the merge, while the checks a pass close
-left `after_merge` wait for the deploy — and the item comes back to
-`in_review` only by a `close_session` with every criterion met.
+`report_progress` is not a substitute for it. `done` and `verifying` are
+yours to set on your own judgement (the trail names you and your token):
+`verifying` is the deploy, while the checks a pass close left `after_merge`
+wait for it, and the item comes back to `in_review` with a `close_session`
+with every criterion met.
 
 If something genuinely has no item, say so on purpose — `Loopable: none —
 <why>` — because a stated exception can be argued with and silence cannot.

@@ -128,7 +128,6 @@ foresee, not only the gaps:
 - What to do when a check outside the suite, or a criterion only a deploy can
   show, is the one thing left.
 - Which item goes first when two touch the same files, and which can wait.
-- Which items the person marks `ready` now.
 
 Ask again only about what the answers opened. When nobody can answer a question
 now, that item is `not now`, and the rest of the batch goes ahead.
@@ -151,7 +150,7 @@ step> — each "<a> before <b>" becomes a blocking link
   Decided in advance: if <X>, then <Y>   (one line per fork you can foresee)
   Criteria changed: <what the answers add or reword, with its verify method>
   Out of scope: <what goes to a follow-up>
-  Ready: <the person marks it | marked by this token on their word | stays todo>
+  Ready: <marked by this token once ready_blockers is empty | stays todo, and why>
 
 Stops
 <what parks an item instead of asking (the others continue), and what waits for
@@ -198,11 +197,10 @@ Only now does anything get written, and only through the loopable MCP.
    plan's order, `blocker_id` first. A link has no undo from a token, so link
    only an order the person approved, and look at `get_item`'s links first so
    none is written twice.
-3. **Readiness, through `report_progress`** with `ready` — only on the items the
-   person named ready in their answers, and only when the token carries the grant
-   to take that edge. Without it the API refuses: say which items the person
-   marks ready themselves, in the app. Never on your own judgement that an item
-   is groomed.
+3. **Readiness, through `report_progress`** with `ready` — on your own judgement,
+   once the item's `ready_blockers` is empty (any studio token takes the edge,
+   and the trail names it). An item with blockers is refused: write what is
+   missing first, or say what is left.
 4. **Hand the batch to the driver.** When your own instructions are the
    driver's (they open with "You are the driver"), run the ready items in the
    plan's order, from the main checkout. Otherwise tell the person to start

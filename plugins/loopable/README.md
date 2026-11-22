@@ -503,8 +503,8 @@ Nothing is written until the person approves, and then **only into the
 backlog**: each item's answers and every `Decided in advance: if X, then Y`
 fork go into its brief through `write_brief` (the next revision, the open
 questions it answered cleared), the order between items into blocking links
-through `link_items`, and the items the person names ready through
-`report_progress`, when the token carries the grant. There is no plan file, in
+through `link_items`, and the items with no `ready_blockers` ready through
+`report_progress`. There is no plan file, in
 the repository or beside it: the driver reads a planned batch from the briefs
 and the links, treats those lines as answered, and runs each item to a merge, a
 person, or parked, without a question mid-run. `test.sh` holds the skill's
@@ -533,7 +533,7 @@ start.sh  →  builder  →  ship.sh --prepare  →  verifier + reviewer  →  s
 ```
 
 **It hands a person three things and nothing else**: what `AGENTS.md` names as
-a person's (a sign-off, the `ready` gate); what is hard to undo (deleting data,
+a person's (a sign-off); what is hard to undo (deleting data,
 tearing down a stack, a secret, a public API, weakening its own gates without a
 person's decision); and a risk a person must own (one the reviewer names, a head
 nothing could verify). A question only the person can answer is asked once, in a
@@ -596,12 +596,10 @@ dependencies and build output go silently: `git worktree remove` deletes a
 `.env` without a word, so `git status --ignored` is read first and the person
 is told.
 
-**The ready gate binds it.** An agent token cannot set `ready`, so the driver
-files work and then says which items need marking ready. That is the point
-rather than a limitation: a person approves the work before an agent builds it.
-A person may mint their token on `/tokens` with the grant to set `ready`,
-`verifying` and `done` for them; the driver then sets one only when that person
-asks for it in the session and names the items, never on its own.
+**The token takes any edge.** A studio token moves any item it reaches to any
+status on the driver's own judgement — `ready`, `verifying`, `done` and
+`dropped` included. The trail names the person and the token for each move;
+that record is the control. `start.sh` still refuses an item that is not ready.
 
 **It never edits.** The lead that writes code stops judging it, so every change
 is a `builder`'s, one per item, in that item's worktree — or, once escalated,
@@ -646,7 +644,7 @@ A session started as the marshal plans the work several drivers share. It reads
 the backlog through the loopable MCP — `list_backlog` with `titles_only` and a
 status filter, `get_item`, `pull_item` — audits every open item against
 `AGENTS.md` and the vocabulary, fixes what an agent may through `add_item`,
-`revise`, `write_brief` and `link_items`, and sorts what could be built into
+`revise`, `write_brief`, `link_items` and `report_progress`, and sorts what could be built into
 ready, waiting on an answer, blocked, too big and not scoped (an item's
 readiness is its brief and its `ready_blockers`). It asks the person every open
 question at once and records the answers on the briefs, as `/loopable:plan`

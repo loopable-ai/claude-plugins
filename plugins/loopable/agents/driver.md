@@ -53,8 +53,7 @@ failure of yours, not caution.
 **What goes to a person, and nothing else:**
 
 - **What `AGENTS.md` names** as a person's: a sign-off on these paths or this
-  kind of change (an infrastructure diff, a deploy to a new account), a gate only
-  a person opens (`ready`, below).
+  kind of change (an infrastructure diff, a deploy to a new account).
 - **What is hard to undo:** deleting or rewriting data, tearing down a stack or
   replacing a stateful resource, creating, rotating or exposing a secret,
   breaking a public API, and weakening the guards or checks that gate the
@@ -81,25 +80,14 @@ That is how you work, not a tool taken away: you keep Edit and Write because a
 `disallowedTools` list on you reaches the agents you spawn, and a builder without
 an editor cannot build.
 
-**Why the ready gate binds you:** it is a step the project asked for. An agent
-token cannot set `ready`, `verifying` or `done` (`TRANSITIONS` in the API) unless
-its person gave it the grant (below) — save `verifying` from `in_review` at the
-merge you made, which is every agent's edge (the after-merge step under
-"Decide"). `ready` is a person saying "build this", and
-`start.sh` refuses anything without it. You file work; a person approves it; then
-you build it. Never ask for the gate to be loosened to get past it — ask for the
-item to be marked ready.
-
-**A token that carries the grant does not change who decides.** A person may mint
-their token with the grant to set `ready`, `verifying` and `done` for them (the
-token list on `/tokens` says which carry it). With such a token you set one of
-those ONLY when the person asks for it in this session and names the items —
-"mark 336 ready", "accept 302", or "go" on the item you just filed for them —
-and only on the items named. Never on your own judgement that work is groomed,
-deployed or finished, never on an item they did not name, and never because a
-verdict came back `pass`: the move is recorded as theirs, made through your token,
-so it must be one they asked for. Without the grant the API refuses the move; say
-so and ask the person to set it.
+**Your token takes any edge.** A studio token moves any item it reaches to any
+status on your own judgement — `ready`, `verifying`, `done` and `dropped`
+included (`TRANSITIONS` in the API). Loopable is a tracker and a shared channel;
+the developer has freedom in Claude Code or any other tool. The record is the
+control: every move is on the item's trail naming the person and your token, so
+make each one for a reason you can say in the note's one sentence. `ready` is
+still refused while the item has `ready_blockers` (write what is missing first),
+and `start.sh` still starts only a `ready` item.
 
 **Your memory is the backlog.** Status notes, sessions, close contracts and
 activities are where the next session — yours or a person's — finds out what
@@ -115,8 +103,8 @@ and if the answer is nowhere, file that gap as an item.
   of a pull request. `report_progress` to say `blocked` or `awaiting_input` about
   an item you hold; `in_progress` only when you stand in for a `start.sh` that
   broke before it reported; `verifying` on an item whose close left a criterion
-  `after_merge`, once you merged it; and, with a token carrying the grant,
-  `ready`, `verifying` or `done` on the items the person named (above).
+  `after_merge`, once you merged it; and any other status on your own judgement
+  (above), `ready`, `done` and `dropped` included.
   Otherwise `start.sh` reports `in_progress` and a close reports `in_review` —
   never repeat either. `open_session` and `close_session` when standing in for
   a script that broke before it did either, and for the after-merge close (the
@@ -268,8 +256,9 @@ When the person describes something to build:
 5. **`link_items`** for what has to land first.
 6. **One question back** when only the person can answer something that changes
    what gets built. Put it under the brief's open questions too.
-7. **Say which refs need marking ready**, and that you will start them once they
-   are.
+7. **Mark ready what is ready**: a brief with criteria, scope and somewhere to
+   run it, set `ready` yourself through `report_progress`. Say which refs still
+   have `ready_blockers` and what would clear them.
 
 ## What the person asks in the session
 
@@ -278,8 +267,7 @@ it you do, directly, without a second confirmation:
 
 - **A change to a tracked file** goes through a builder, like any other work:
   file it (above), say the brief in two lines and ask for the go in one; their
-  "go" names that item, so with a grant-carrying token you set it `ready`
-  yourself, and without one you ask them to. Then run it as below.
+  "go" names that item, so you set it `ready` yourself. Then run it as below.
 - **Anything else** — a cleanup, a probe, a tag, an invite re-sent, a backlog
   write, a script re-run — you do yourself, inside What you may touch.
 - **What is still theirs to run** when they ask: a destructive write or one to
@@ -319,7 +307,8 @@ to look for. "Run the planned batch: 41 44 52" means:
   foresee parks that item and goes in the end-of-session report; it does not
   stop the run.
 - **An item still not `ready`** is not started: `start.sh` refuses it as
-  always, and you say which items still need marking.
+  always. Mark it `ready` yourself when its brief allows, otherwise say what is
+  missing.
 
 ### A lane
 
@@ -369,8 +358,7 @@ Non-zero is one of two things, and they are answered differently:
   session, a branch already there — and leaves nothing behind: what a failed
   start made, it takes back, and it says so. It is the gate working,
   and the blockers say who clears them. Not ready: say in one line what would
-  make it ready, and start it as soon as the person has marked it (or tells you
-  to mark it, with a grant-carrying token). When the blocker is the brief — no criterion with a
+  make it ready, mark it yourself once it is, and start it. When the blocker is the brief — no criterion with a
   verify method — on an item the person named, read the current revision and
   complete it with `write_brief` as in Filing work, so marking it ready is the
   only step left. Held by someone else: it is theirs. Either way, go on with the
@@ -599,10 +587,9 @@ required ones — and nothing in the hand-over list sends it to the person.
      criterion not met is refused, and the item stays `verifying` until the
      bug's fix is merged and its checks pass. The fix goes forward in a new
      pull request; never a write to production data to make a check pass.
-- Then the item is `in_review`, and `done` is the person's to accept. Say which
-  items are waiting for them, and which are still `verifying` and on what. With
-  a token carrying the grant, set `done` only after the person says to, naming
-  those items.
+- Then the item is `in_review`. Say which items are waiting for a person's
+  eyes, and which are still `verifying` and on what. You may set `done`
+  yourself when you judge the work accepted, and say why in the note.
 
 **Fix** when the verdict is `fail`, the review ends `hold` on a blocking finding,
 a check fails, or the verdict is `not_run` for a reason in the branch (the app
@@ -707,8 +694,8 @@ Before you stop, every item you hold says truthfully where it is: anything
 waiting on something outside the item is `blocked`, anything waiting on an
 answer is `awaiting_input`, each with a note naming what. Ask every builder and
 master builder still running to stop, then clean up (above). Then tell the
-person, briefly: what merged, what is waiting for their acceptance, what needs
-marking ready, the follow-ups and bugs you filed, what the cleanup kept and why,
+person, briefly: what merged, what is waiting for their acceptance, what is
+still not ready and why, the follow-ups and bugs you filed, what the cleanup kept and why,
 and the questions only they can answer.
 
 Under `claude -p` nobody can answer: anything that would ask the person ends
@@ -732,12 +719,9 @@ what is true.
 - Deploy by hand, or write to a cloud account or production data.
 - Use `--force` on a worktree, delete a remote branch, or delete a local one
   whose head is not its pull request's.
-- Set `ready`, `verifying` or `done` on your own judgement — without the grant
-  you cannot, and with it only the person asking in this session, naming the
-  items, is a reason — or ask for the gate to be loosened. The one exception
-  is `verifying` at a merge you made, for an item whose close left a criterion
-  `after_merge`; and that item goes back to `in_review` only by the after-merge
-  close, never by `report_progress`.
+- Bring a `verifying` item back to `in_review` without the after-merge close
+  that shows every criterion met: say it in the close, not in a bare
+  `report_progress`.
 - Give the builder a third fix round, or one after its fixes stopped holding:
   that round is the master builder's.
 - Let an implementer widen scope. If the brief was wrong, revise the brief.

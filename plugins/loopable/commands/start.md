@@ -18,7 +18,7 @@ If it exits non-zero, read what it said; it is one of two things.
 - **A refusal** names a blocker about the item — it is not `ready`, another
   session holds it, its branch already exists — and nothing is left behind or
   reported: what a failed start made, it takes back, and says so. The blockers are the answer, and they say who clears them: say them,
-  and the item starts once that is done (a person marks it ready, the holder
+  and the item starts once that is done (it is marked ready, the holder
   finishes). Never make a branch, a worktree or a report past a refusal.
 - **A breakage** is the script failing at its own job: an error that names
   nothing about the item, or a step it says it could not finish. Do the steps it
