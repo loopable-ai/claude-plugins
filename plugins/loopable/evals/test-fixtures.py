@@ -364,6 +364,25 @@ class TheStandIns(unittest.TestCase):
         finally:
             w.close()
 
+    def test_get_item_answers_with_the_apis_six_top_level_keys(self):
+        """The API's get_item gives item, brief, children, links, trail and graph:
+        lists and an object. The fake gives the same keys, no more, in those types."""
+        w = Walk('after-merge')
+        try:
+            p = w.fx['project']
+            parent = str(w.tool('add_item', {'project_id': p, 'title': 'parent', 'kind': 'epic'})['item']['ref'])
+            w.tool('add_item', {'project_id': p, 'title': 'child', 'kind': 'story', 'parent_id': parent})
+            got = w.tool('get_item', {'project_id': p, 'item_id': parent})
+            self.assertEqual(sorted(got), ['brief', 'children', 'graph', 'item', 'links', 'trail'])
+            self.assertIsInstance(got['item'], dict)
+            self.assertIsInstance(got['brief'], dict)
+            self.assertIsInstance(got['graph'], dict)
+            for k in ('children', 'links', 'trail'):
+                self.assertIsInstance(got[k], list, k)
+            self.assertEqual([c['title'] for c in got['children']], ['child'])
+        finally:
+            w.close()
+
     def test_get_item_carries_ready_blockers_and_no_environment_is_judged(self):
         """get_item reads ready_blockers on the item like pull_item and the API
         do; no_environment is reported for a browser or http criterion with no

@@ -158,9 +158,13 @@ class Backlog:
                           'out_of_scope': it.get('out_of_scope', []),
                           'assumptions': it.get('assumptions', []),
                           'open_questions': it.get('open_questions', [])},
+                'children': [self.summary(c) for c in sorted(self.s['items'].values(), key=lambda c: c['ref'])
+                             if c.get('parent_id') == it['id']],
                 'links': [l for l in self.s['links'] if it['id'] in (l['blocker_id'], l['blocked_id'])],
-                'sessions': [self.session_view(s) for s in self.s['sessions'].values()
-                             if s['item_id'] == it['id']]}
+                # The API's trail and graph are lists and an object; the fake
+                # holds nothing it reads back as either, so they are empty.
+                'trail': [],
+                'graph': {'nodes': [], 'edges': []}}
 
     def session_view(self, s):
         return {k: v for k, v in s.items() if k != 'activities'} | {
