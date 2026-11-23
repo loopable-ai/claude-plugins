@@ -421,21 +421,22 @@ else
   WT_BEFORE=$(worktree_pairs | cut -f1)
   BR_BEFORE=$(branches)
   MADE=1
+  # FETCH FIRST (432), BOTH PATHS (445): the configured command usually cuts
+  # from origin/main, and so does the fallback; a branch cut from a stale one
+  # starts behind a merge a minute old. A failed fetch is said, with the reason
+  # git gave, and the start goes on from the origin/main there is, naming its
+  # commit: a person waiting is better told than refused.
+  if ! FETCH_ERR=$(git -C "$MAIN" fetch origin 2>&1 >/dev/null); then
+    say "Warning: \`git fetch origin\` failed; going on from the origin/main this checkout has,"
+    say "$(git -C "$MAIN" rev-parse --short origin/main 2>/dev/null || echo 'no origin/main'). It may be behind."
+    [ -z "$FETCH_ERR" ] || say "git said: $(printf '%s' "$FETCH_ERR" | tr '\n' ' ')"
+    say
+  fi
   if [ -n "$CMD" ]; then
     # FROM THE MAIN CHECKOUT, like the fallback (371): a start: line with a
     # relative path — this repository's is — run from inside a linked worktree
     # would nest the new worktree in that one, and it goes when that one does.
     #
-    # FETCH FIRST (432): the configured command usually cuts from origin/main,
-    # and a branch cut from a stale one starts behind a merge a minute old. A
-    # failed fetch is said and the start goes on from the origin/main there is,
-    # naming its commit: the command was asked for, and a person waiting is
-    # better told than refused.
-    if ! git -C "$MAIN" fetch origin >/dev/null 2>&1; then
-      say "Warning: \`git fetch origin\` failed; going on from the origin/main this checkout has,"
-      say "$(git -C "$MAIN" rev-parse --short origin/main 2>/dev/null || echo 'no origin/main'). It may be behind."
-      say
-    fi
     ( cd "$MAIN" && eval "$CMD" ) || fail \
       "The repository's own start command failed:
 
@@ -443,9 +444,6 @@ else
 
 Nothing has been reported. Fix that, or run it by hand, before starting again."
   else
-    git -C "$REPO" fetch origin >/dev/null 2>&1 || fail \
-      "\`git fetch origin\` failed, so origin/main cannot be trusted to be current.
-A branch cut from a stale main is the bug this command exists to avoid."
     # The branch as ONE path segment: `story/x` would be a directory per kind.
     git -C "$REPO" worktree add -q -b "$BRANCH" "$FALLBACK_WT" origin/main ||
       fail "Could not create the worktree for $BRANCH from origin/main. Nothing has been reported."

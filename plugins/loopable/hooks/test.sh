@@ -2311,6 +2311,23 @@ check "a failing fetch — the start still exits 0" 0 "$RC"
 check "it says the fetch failed" 1 "$(printf '%s\n' "$OUT" | grep -c 'git fetch origin. failed')"
 check "it prints the commit it went on from" 1 "$(printf '%s\n' "$OUT" | grep -c "^${HAVE:0:7}. It may be behind")"
 check "and the branch is cut from it" "$HAVE" "$(git -C "$SRT" rev-parse feat/p2-the-start-command-41)"
+check "it carries the reason git gave (445)" 1 "$(printf '%s\n' "$OUT" | grep -c '^git said: .*no-such-origin')"
+
+# THE FALLBACK, THE SAME (445): no start: line, a failed fetch is said with its
+# reason and the worktree is made from the origin/main there is.
+git -C "$SRT" worktree remove --force "$SRTP/.loopable/worktrees/story-the-start-command-41" 2>/dev/null
+git -C "$SRT" worktree prune
+git -C "$SRT" branch -D story/the-start-command-41 >/dev/null 2>&1
+start_config
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the fallback, a failing fetch — exits 0" 0 "$RC"
+check "it says the fetch failed" 1 "$(printf '%s\n' "$OUT" | grep -c 'git fetch origin. failed')"
+check "it names the commit it cuts from" 1 "$(printf '%s\n' "$OUT" | grep -c "^${HAVE:0:7}. It may be behind")"
+check "it carries the reason git gave" 1 "$(printf '%s\n' "$OUT" | grep -c '^git said: .*no-such-origin')"
+check "and the branch is cut from it" "$HAVE" "$(git -C "$SRT" rev-parse story/the-start-command-41)"
+git -C "$SRT" worktree remove --force "$SRTP/.loopable/worktrees/story-the-start-command-41" 2>/dev/null
+git -C "$SRT" worktree prune
+git -C "$SRT" branch -D story/the-start-command-41 >/dev/null 2>&1
 git -C "$SRT" remote set-url origin "$ORIGIN"
 git -C "$SRT" fetch -q origin
 start_config "start: sh $STUB/mkwt.sh <type>/x-<slug>"
