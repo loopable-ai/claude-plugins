@@ -343,18 +343,20 @@ lane. Build them so that:
 
 **Write each lane to Loopable with the `lanes` tool** (`create`, and `rewrite`,
 which replaces the lane whole, so send every item you keep, in order). A lane
-is: its `name`; its `stops`; and its `items` in run order, each
-`{ item_id, group, budget_hours, decided, merges, out_of_scope }`. Fill them so:
+is: its `name`; its `stops`; its `other_lanes`; and its `items` in run order, each
+`{ item_id, group, budget_minutes, survey_path, decided, merges, out_of_scope }`.
+Fill them so:
 
 - `name`: the lane's name; it is what the person types after `Follow lane`.
 - `items`: the ready items in the order the lane runs them, `group` a whole
   number from 1, items of one group may run in parallel and a lower group runs
   before a higher one (each sequence is also a blocking link in the backlog).
-- `budget_hours`: the item's budget in hours, which is its minutes over 60.
-  Budgets are in minutes, sized from what a lane's items took on 2026-11-22: a
-  one-layer item about 15 (`0.25`), a database or multi-layer item about 45
-  (`0.75`); over 90 is too big. Give them in minutes in your reply and on the
-  board.
+- `budget_minutes`: the item's budget in whole minutes. Budgets are sized from
+  what a lane's items took on 2026-11-22: a one-layer item about 15, a database
+  or multi-layer item about 45; over 90 is too big. Give them in minutes in your
+  reply and on the board.
+- `survey_path`: the item's survey, `<main>/.loopable/marshal/surveys/<ref>.md`,
+  or leave it out when there is none.
 - `decided`: one line per answer already given (`Answered: <question> —
   <answer>`) and per fork you can foresee (`Decided in advance: if <X>, then
   <Y>`), as recorded on the brief.
@@ -362,15 +364,13 @@ is: its `name`; its `stops`; and its `items` in run order, each
   release tag).
 - `out_of_scope`: one line per thing that goes to a follow-up item.
 - `stops`: what parks an item instead of asking, and what waits for the end-of-run
-  report. The other lanes' names and refs go in a `decided` line of each item,
-  or in `stops`, as "not this driver's to touch".
+  report.
+- `other_lanes`: the names of the other lanes working the same checkout, as
+  "not this driver's to touch".
 
-The lanes API holds no field for the survey path, the item's status or an
-"other lanes" list. A fact the driver needs and no field holds goes in that
-item's `decided` text (`Survey: <main>/.loopable/marshal/surveys/<ref>.md`, for
-one), and you name the field in your reply so the gap is filed as an item; you
-change no API for it. Read the lane back with `lanes` (`get`) after writing it
-and say the items you saw.
+An item's status is not a lane field: the lane read shows it from the backlog.
+Read the lane back with `lanes` (`get`) after writing it and say the items you
+saw.
 
 Each order goes the same way with the `orders` tool, below.
 
