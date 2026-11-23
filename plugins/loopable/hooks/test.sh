@@ -3342,6 +3342,39 @@ check "the driver follows a lane as a planned batch" none \
   "$(for w in 'Follow lane <name>' '<main>/.loopable/marshal/lanes/<name>.md' 'as a planned batch' \
               'Take only its items' '`Other lanes`' 'worktrees, branches and pull requests'; do
        printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+# THE DRIVER'S LANE IS READ FROM LOOPABLE AND ITS STATUS IS THE MESSAGES (417).
+# Read from the lanes tool first, the file only when Loopable has none, and the
+# source said in the first of the opening lines; the lane and the orders are
+# read again before each item; only an ask, a blocker, a fact recorded nowhere
+# else and lane_ended go to the marshal.
+check "the driver reads its lane with the lanes tool first, the file only as the fallback" none \
+  "$(for w in 'Read it with the `lanes` tool of the loopable MCP first' \
+              'action `list`, pick the lane whose name matches' 'then action `get` with that lane'"'"'s id' \
+              'only when the list has no lane of that name' \
+              'Say which you used in the first of the three lines'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "it takes the lane's items in its order and counts each decided-in-advance line as an answer" none \
+  "$(for w in 'Take only its items, in its order' 'is an answer already given'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "it leaves other lanes' worktrees, branches, pull requests and state out of its cleanup" none \
+  "$(for w in 'worktrees, branches and pull requests' 'state and run directories' 'your cleanup, at the start and at the end, skips'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "it re-reads the lane and the orders before each item, and a change leaves started items its own" none \
+  "$(for w in 'Read the lane and the orders again before you start each item' 'without a restart' 'leaves that item yours as started'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "a second driver on the lane takes no in-flight item" none \
+  "$(for w in 'A second driver on the lane' 'takes none'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+check "to the marshal go an ask, a blocker, a fact recorded nowhere else and lane_ended with times, nothing else" none \
+  "$(for w in 'To the marshal, a message only for' 'a fact recorded nowhere else' '`lane_ended` with each item'"'"'s' \
+              'start and merge times' 'acknowledgement of an order, no progress'; do
+       printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+DRIVER_FLAT=$(tr '\n' ' ' < "$AGENTS/driver.md" 2>/dev/null | tr -s ' ')
+check "the driver is told to write no status or handoffs file, and none of the old waiting rules remain" none \
+  "$(printf '%s' "$DRIVER_FLAT" | grep -oiE "(write|keep|append to) (a|the) (status|handoffs?) file[^.]*|wait(s|ing)? for a person to mark[^.]*ready|(never|cannot|can ?not|may not|not allowed to) sets? (ready|verifying|done|dropped)[^.]*|(never|cannot|may not) (set|mark) (it |an item )?(ready|verifying|done|dropped)[^.]*|a person marks an item ready" |
+       sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "and says its status is the messages it sends" 1 \
+  "$(printf '%s' "$LANE_STEP" | grep -cF 'Write no separate status and no handoffs file' | sed 's/^[1-9][0-9]*$/1/')"
 
 # --- the two version checks (335) -----------------------------------------
 echo

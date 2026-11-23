@@ -357,31 +357,59 @@ to look for. "Run the planned batch: 41 44 52" means:
 
 ### A lane
 
-When the person's prompt names one — `Follow lane <name>` — the batch is the
-lane file `<main>/.loopable/marshal/lanes/<name>.md`, written by
-`loopable:marshal`, and you run it as a planned batch, exactly as above. Its
-`## Order` and the blocking links are the order; its `Decisions` and `Decided in
-advance` lines are rows the marshal also recorded on each brief, so you read the
-brief's rows with `get_item` and append them as `From the plan` as above — when
-the lane and the brief differ, the brief's newest revision governs, and you say
-which line differed. Its `Stops` say what parks an item. Its `Merge:` line names
-an item a person merges.
+When the person's prompt names one — `Follow lane <name>` — the batch is that
+lane, and you run it as a planned batch, exactly as above. **Read it with the
+`lanes` tool of the loopable MCP first**: action `list`, pick the lane whose
+name matches `<name>` (ignoring case), then action `get` with that lane's id (the
+tool takes the id, never the name): its items in order, each with its
+decided-in-advance lines, its stops and its merge line. Read the file
+`<main>/.loopable/marshal/lanes/<name>.md` only when the list has no lane of that
+name, or Loopable cannot be reached. Say which you used in the first of the
+three lines you say at the start of the session: `lane <name> from Loopable` or
+`lane <name> from the file`. Read the orders in force with the `orders` tool at
+the same time.
 
-- **Take only its items:** the refs under its `## <ref> <title>` headings. When
-  the lane is done, stop: say what merged, what is parked and what you filed,
-  and end. Never pick more from the backlog or `next_ready`; an item filed during
-  the run is filed and left for the marshal to plan.
+The lane's `Decisions` and `Decided in advance` lines are rows the marshal also
+recorded on each brief, so you read the brief's rows with `get_item` and append
+them as `From the plan` as above. Each decided-in-advance line is an answer
+already given: when its condition happens, do what it says and post the
+judgement naming the line, and never ask the person or the marshal what it
+answers. When the lane and the brief differ, the brief's newest revision
+governs, and you say which line differed. Its `Stops` say what parks an item.
+Its `Merge:` line names an item a person merges.
+
+- **Take only its items, in its order:** the refs under its `## <ref> <title>`
+  headings, in the order of its `## Order` and the blocking links. When the lane
+  is done, stop: say what merged, what is parked and what you filed, send
+  `lane_ended` (below), and end. Never pick more from the backlog or `next_ready`;
+  an item filed during the run is filed and left for the marshal to plan.
+- **Read the lane and the orders again before you start each item**, so an item
+  the marshal added and an order given after your start are seen without a
+  restart. A change that arrives while an item is in flight leaves that item
+  yours as started; apply it from the next item on.
+- **A second driver on the lane** sees the first one's in-flight items by their
+  sessions (`get_item`: its status and its open session) and takes none
+  of them. It says so, and stops when nothing is left.
 - **A survey the lane names** (`Survey: <path>`) is the map for that item: once
   `start.sh` has made its worktree, copy that file to `<state>/survey.md` and
   spawn no surveyor for it.
 - **The lanes it lists under `Other lanes`** belong to other driver sessions
   working in this same checkout. Never start, ship, merge or report on their
-  items, and leave their worktrees, branches and pull requests alone: your
-  cleanup skips every worktree whose branch belongs to another lane's item,
+  items, and leave their worktrees, branches and pull requests alone, and their
+  state and run directories with them: your cleanup, at the start and at the
+  end, skips every worktree whose branch belongs to another lane's item,
   whatever its pull request's state, because removing it is that driver's.
+- **Your status is the messages.** Each assignment, amendment, report, question,
+  park and merge you send (the protocol above) is where a person or another
+  agent reads where the lane stands, without asking you. Write no separate
+  status and no handoffs file.
+- **To the marshal, a message only for:** an ask only it can answer (a
+  `question`), a blocker (a `park` or an `escalate` it must act on), a fact
+  recorded nowhere else, and the end of the lane, a `lane_ended` with each item's
+  start and merge times (and what is parked). Nothing else goes to it: no
+  acknowledgement of an order, no progress, no note that an item started or a
+  check passed.
 - **Never write under `<main>/.loopable/marshal/`**: the lane is the marshal's.
-  A question for the marshal goes to its session when yours can send one, and
-  otherwise to the person.
 
 ### 1. Start
 
