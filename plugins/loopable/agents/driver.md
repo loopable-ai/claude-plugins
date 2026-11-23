@@ -417,9 +417,10 @@ Its `Merge:` line names an item a person merges.
   the marshal added and an order given after your start are seen without a
   restart. A change that arrives while an item is in flight leaves that item
   yours as started; apply it from the next item on.
-- **A second driver on the lane** sees the first one's in-flight items by their
-  sessions (`get_item`: its status and its open session) and takes none
-  of them. It says so, and stops when nothing is left.
+- **A second driver on the lane** sees the first one's in-flight items by what
+  `get_item` returns (its status and its stage), by the item's message thread,
+  and by the 409 `open_session` answers when a session is already open. It
+  takes none of them. It says so, and stops when nothing is left.
 - **A survey the lane names** (`Survey: <path>`) is the map for that item: once
   `start.sh` has made its worktree, copy that file to `<state>/survey.md` and
   spawn no surveyor for it.

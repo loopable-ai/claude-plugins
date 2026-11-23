@@ -3392,6 +3392,11 @@ DRIVER_FLAT=$(tr '\n' ' ' < "$AGENTS/driver.md" 2>/dev/null | tr -s ' ')
 check "the driver is told to write no status or handoffs file, and none of the old waiting rules remain" none \
   "$(printf '%s' "$DRIVER_FLAT" | grep -oiE "(write|keep|append to) (a|the) (status|handoffs?) file[^.]*|wait(s|ing)? for a person to mark[^.]*ready|(never|cannot|can ?not|may not|not allowed to) sets? (ready|verifying|done|dropped)[^.]*|(never|cannot|may not) (set|mark) (it |an item )?(ready|verifying|done|dropped)[^.]*|a person marks an item ready" |
        sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "the second-driver line names status, stage, the message thread and open_session's 409, and no open session from get_item" none \
+  "$({ for w in 'A second driver on the lane' 'its status and its stage' "the item's message thread" 'the 409 `open_session` answers'; do
+         printf '%s' "$LANE_STEP" | grep -qF -- "$w" || printf '[%s] ' "$w"; done
+       printf '%s' "$DRIVER_FLAT" | grep -qE 'get_item`: its status and its open session|get_item[^.]{0,40}open session' && printf '[get_item open session] '; } |
+     sed 's/ $//' | grep . || echo none)"
 check "and says its status is the messages it sends" 1 \
   "$(printf '%s' "$LANE_STEP" | grep -cF 'Write no separate status and no handoffs file' | sed 's/^[1-9][0-9]*$/1/')"
 
