@@ -153,10 +153,13 @@ item a question is about (a question is a message: its id is refused),
 `--pr <number>` for each pull request waiting on checks or a review and for
 another lane's you are held behind, `--branch <default branch>`, and
 `--deadline '<label>=<when>'` with `<when>` in epoch seconds. What you do
-yourself does not wake you only if you say what it is: the feed carries no actor
-and no session, so pass `--ignore-kind item_moved --ignore-kind session_closed`,
-the rows your own `start.sh` and `ship.sh --close` write (a person's move of
-the same kind is ignored with them). The watch reports a change, not a state:
+yourself does not wake you if you name the sessions you run: pass
+`--self-session <id>` for each item you watch, read from that item's
+`<state>/session` (a fix round runs on a NEW session, which `ship.sh` writes
+there: read it again every time you start the watch, never keep the first), and
+the feed's messages, your `ship.sh --close` and its move are yours, not news.
+Never `--ignore-kind` the moves: a person's move of an item you watch, such as
+readying one after a `brief_defect`, is exactly what the watch is for. The watch reports a change, not a state:
 read the current state first (`gh pr checks <pr>` once, the item once) before
 you start it. It exits 0 with what changed; act on it, then
 start it again with what you now wait on. An hour with nothing ends it with a

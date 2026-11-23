@@ -4,8 +4,9 @@
 # changed, and prints what changed, so the wake carries the news.
 #
 #   watch.sh [--project <id>]
-#            [--inbox-session <uuid> | --inbox-person <uuid> | --inbox-lane <name>]
-#            [--role <role>] [--self-session <uuid>] [--self-actor <name>]
+#            [--inbox-session <uuid> | --inbox-person <uuid> | --inbox-lane <name>
+#             | --inbox-role <role>]
+#            [--role <role>] [--self-session <uuid>]... [--self-actor <name>]
 #            [--ignore-kind <feed row kind>]...
 #            [--item <ref>]... [--lane <name>]...
 #            [--pr <number>]... [--branch <default branch>]
@@ -16,9 +17,11 @@
 #
 # WHAT WAKES IT (exit 0, the news on stdout, one line each, `MESSAGE`, `CHANGE`,
 # `PR`, `BRANCH` or `DEADLINE`):
-#   - a message addressed to the inbox (a session, a person or a lane, exactly
-#     one), read from the messages route after the cursor taken at the start.
-#     `--role` keeps only messages whose to_role is that role;
+#   - a message addressed to the inbox (a session, a person, a lane or a role,
+#     exactly one), read from the messages route after the cursor taken at the
+#     start. `--inbox-role marshal` is every message for the marshal in the
+#     project, whoever or whichever lane it named (454). `--role` keeps only
+#     messages whose to_role is that role;
 #   - a row of the change feed (414) about a named item or lane: a move, a
 #     message, a lane rewrite. The feed is only read when something is named,
 #     because a read with nothing named is the whole project;
@@ -37,22 +40,25 @@
 # WHAT IT IGNORES: everything before it started (the cursor of each read is
 # taken once, at the start: a replayed history is not news); a message the
 # agent's own session sent (`--self-session`, matched on from_session_id); and
-# a pull request or a branch that stays as it was. The change feed names NO
-# session, and today its `actor` is null on every row (454 asks for a session
-# on the rows), so an agent's own moves are told apart by what they are:
-#   --ignore-kind <kind>   (repeatable) drops feed rows of that kind, for the
-#                          kinds only this agent writes on its item, such as
-#                          item_moved and session_closed for the driver. A
-#                          person's move of the same kind is dropped with it.
+# a pull request or a branch that stays as it was. Each feed row about a
+# message or a move made in a session names that session (454), so
+# `--self-session` (repeatable: one per session the agent runs) drops the feed's
+# rows as well as the inbox's: a message the session sent, its own close, its own move. A session_closed row names the session whoever closed it, so
+# the clock marking the agent's own session stale is dropped with it. A person's move, with no session,
+# is news. Rows with no session are told apart by what they are:
+#   --ignore-kind <kind>   (repeatable) drops feed rows of that kind. It drops
+#                          a person's rows of the same kind with them, so
+#                          prefer --self-session.
 #   --role <role>          also drops the feed's messages sent BY that role
-#                          (the summary names the sender's role).
-#   --self-actor <name>    drops rows whose actor is that name, for the day the
-#                          feed carries one (it names the token's user, not the
-#                          agent, so share-nothing tokens only).
+#                          (the summary names the sender's role), which also
+#                          hides another agent of the same role.
+#   --self-actor <name>    drops rows whose actor is that name (lane and order
+#                          rows carry the token's user, so share-nothing tokens
+#                          only).
 #
 # WHEN IT CANNOT READ: three reads of Loopable in a row, or of GitHub, that
-# fail (no answer, or a 5xx) end it with exit 2 and a line saying which. The
-# agent falls back to a timer then. No token is the same, at once. A 4xx is a
+# fail (no answer, a 429 or a 5xx) end it with exit 2 and a line saying which. The
+# agent falls back to a timer then. No token is the same, at once. Any other 4xx is a
 # refusal, not an outage: it ends the watch at once with exit 64 and the
 # refusal, and a bad --item is refused at the start.
 #
@@ -71,7 +77,7 @@ MAX_FAILS=3
 
 die() { printf '%s\n' "$*" >&2; exit 64; }
 
-PROJECT="" ISESSION="" IPERSON="" ILANE="" ROLE="" SELF_SESSION="" SELF_ACTOR="" IGNORE_KINDS=""
+PROJECT="" ISESSION="" IPERSON="" ILANE="" IROLE="" ROLE="" SELF_SESSION="" SELF_ACTOR="" IGNORE_KINDS=""
 BRANCH=""
 ITEMS=() LANES=() PRS=() DEADLINES=()
 while [ $# -gt 0 ]; do
@@ -81,8 +87,9 @@ while [ $# -gt 0 ]; do
     --inbox-session) ISESSION=$2 ;;
     --inbox-person) IPERSON=$2 ;;
     --inbox-lane) ILANE=$2 ;;
+    --inbox-role) IROLE=$2 ;;
     --role) ROLE=$2 ;;
-    --self-session) SELF_SESSION=$2 ;;
+    --self-session) SELF_SESSION="${SELF_SESSION:+$SELF_SESSION,}$2" ;;
     --self-actor) SELF_ACTOR=$2 ;;
     --ignore-kind) IGNORE_KINDS="${IGNORE_KINDS:+$IGNORE_KINDS,}$2" ;;
     --item)
@@ -99,8 +106,8 @@ while [ $# -gt 0 ]; do
 done
 
 INBOXES=0
-for v in "$ISESSION" "$IPERSON" "$ILANE"; do [ -n "$v" ] && INBOXES=$((INBOXES + 1)); done
-[ "$INBOXES" -le 1 ] || die "watch.sh: name one inbox: a session, a person or a lane."
+for v in "$ISESSION" "$IPERSON" "$ILANE" "$IROLE"; do [ -n "$v" ] && INBOXES=$((INBOXES + 1)); done
+[ "$INBOXES" -le 1 ] || die "watch.sh: name one inbox: a session, a person, a lane or a role."
 [ "$INBOXES" -gt 0 ] || [ ${#ITEMS[@]} -gt 0 ] || [ ${#LANES[@]} -gt 0 ] || [ ${#PRS[@]} -gt 0 ] ||
   [ -n "$BRANCH" ] || [ ${#DEADLINES[@]} -gt 0 ] || die "watch.sh: nothing to watch. Name an inbox, an item, a lane, a pull request, a branch or a deadline."
 
@@ -141,7 +148,8 @@ uri() { jq -rn --arg v "$1" '$v|@uri'; }
 ESC='def esc: tostring | gsub("\n"; "\\n") | gsub("[\u0000-\u001f\u007f-\u009f  ]"; "?");'
 
 # lget <path>: the body on stdout. Returns 1 when Loopable cannot be read (no
-# answer, or a 5xx), and 3 when it ANSWERED with a refusal (a 4xx), keeping the
+# answer, a 429 or a 5xx: too many requests is the API asking for time, an
+# outage to a watch, not a wrong argument), and 3 when it ANSWERED with a refusal (a 4xx), keeping the
 # refusal in $STATE/refused: that is a wrong argument or a lost token, not an
 # outage, and a timer would not fix it.
 lget() {
@@ -152,6 +160,7 @@ lget() {
   code=${out##*$'\n'}; out=${out%$'\n'*}
   case "$code" in
     2??) printf '%s' "$out" ;;
+    429) return 1 ;;
     4??) printf '%s %s' "$code" "$out" | jq -Rr "$ESC"' esc' > "$STATE/refused"; return 3 ;;
     *) return 1 ;;
   esac
@@ -165,6 +174,7 @@ inbox_url() { # inbox_url <after> <limit>
   local sel
   if [ -n "$ISESSION" ]; then sel="session=$(uri "$ISESSION")"
   elif [ -n "$IPERSON" ]; then sel="person=$(uri "$IPERSON")"
+  elif [ -n "$IROLE" ]; then sel="to_role=$(uri "$IROLE")"
   else sel="lane=$(uri "$ILANE")"; fi
   printf '/agent/projects/%s/messages?%s&after=%s&limit=%s' "$PROJECT" "$sel" "$1" "$2"
 }
@@ -187,7 +197,7 @@ inbox_poll() {
   MCURSOR=$(jq -r --arg c "$MCURSOR" '.cursor // $c' <<<"$r")
   jq -r --arg role "$ROLE" --arg self "$SELF_SESSION" "$ESC"'
     .messages[]
-    | select(($role == "" or .to_role == $role) and ($self == "" or .from_session_id != $self))
+    | select(($role == "" or .to_role == $role) and ($self == "" or ((.from_session_id // "") as $f | ($self | split(",") | index($f)) == null)))
     | "MESSAGE \(.type | esc) from \(.from_role | esc) to \(.to_role | esc) item \(.item_id // "-" | esc) lane \(.lane // "-" | esc) id \(.id // "-" | esc)\n  \((.text // "")[0:2000] | esc)"' \
     <<<"$r" >> "$OUT"
 }
@@ -209,10 +219,11 @@ feed_poll() {
   fi
   r=$(lget "$(feed_url "$CCURSOR")") && jq -e '.changes' >/dev/null 2>&1 <<<"$r" || return 1
   CCURSOR=$(jq -r --arg c "$CCURSOR" '.cursor // $c' <<<"$r")
-  jq -r --arg role "$ROLE" --arg actor "$SELF_ACTOR" --arg kinds "$IGNORE_KINDS" "$ESC"'
+  jq -r --arg role "$ROLE" --arg actor "$SELF_ACTOR" --arg kinds "$IGNORE_KINDS" --arg self "$SELF_SESSION" "$ESC"'
     ($kinds | split(",")) as $skip
     | .changes[]
     | select(($actor == "" or .actor != $actor)
+             and ($self == "" or ((.session // "") as $f | ($self | split(",") | index($f)) == null))
              and ((.kind as $k | $skip | index($k)) == null)
              and (($role == "" or .kind != "message") or (.summary | test("^[a-z_]+ " + $role + " to ") | not)))
     | "CHANGE \(.kind | esc) item \(.item // "-" | esc) lane \(.lane // "-" | esc) at \(.at // "-" | esc): \((.summary // "")[0:400] | esc)"' \

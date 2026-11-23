@@ -114,10 +114,12 @@ about (a question is a message: its id is refused), `--pr
 <number>` for each pull request waiting on checks or a review and for the one a
 lane is held behind, `--branch <default branch>` so a red main wakes you,
 `--deadline '<label>=<when>'` for each budget and each question's deadline, with
-`<when>` in epoch seconds, and `--role marshal --ignore-kind lane_written
---ignore-kind order_written` so what you did yourself does not (the feed carries
-no actor and no session; `--role` hides the messages you sent, the kinds hide
-the lanes and orders you write). The watch reports a change, not a state: read
+`<when>` in epoch seconds, and `--inbox-role marshal --role marshal`: every message addressed to the
+marshal wakes you, whoever or whichever lane it named, and `--role` hides the
+messages you sent on a lane you watch (you have no session of your own to name).
+Do not `--ignore-kind` `lane_written` or `order_written`: another's rewrite of
+a lane is news, and yours (which carry no session) wake you once, as the
+confirmation they landed. A message to you about a lane you also watch prints twice, once as `MESSAGE` and once as `CHANGE`, and is one message. The watch reports a change, not a state: read
 the current state first (the board, `gh pr checks <pr>` once) before you start
 it. It prints what changed and exits 0; read it, act, and start it again with
 what you now wait on. It ends after an hour with a line saying so, which is a reason to

@@ -3419,12 +3419,13 @@ echo "$url" >> "$W/calls"
 # a refusal is the API's own 4xx, a 503 is an outage.
 [ -e "$W/refuse" ] && { printf '{"message":"items are refs"}\n400'; exit 0; }
 [ -e "$W/unavailable" ] && { printf '{"message":"asleep"}\n503'; exit 0; }
+[ -e "$W/throttled" ] && { printf '{"message":"Too Many Requests"}\n429'; exit 0; }
 q="${url#*\?}"; [ "$q" = "$url" ] && q=""
 param() { local v; v=$(printf '%s' "$q" | tr '&' '\n' | sed -n "s/^$1=//p" | head -1); v=${v//+/ }; printf '%b' "${v//%/\\x}"; }
 case "$url" in
   */messages\?*)
-    jq -s --argjson a "$(param after)" '
-      map(select(.seq > $a)) as $m | {messages: $m, cursor: (($m | map(.seq) | max) // $a)}' "$W/messages.jsonl" ;;
+    jq -s --argjson a "$(param after)" --arg role "$(param to_role)" '
+      map(select(.seq > $a and ($role == "" or .to_role == $role))) as $m | {messages: $m, cursor: (($m | map(.seq) | max) // $a)}' "$W/messages.jsonl" ;;
   */changes)
     echo '{"changes":[],"cursor":"5","more":false,"limit":100}' ;;
   */changes\?*)
@@ -3449,16 +3450,17 @@ GH
 chmod +x "$W/curl" "$W/gh"
 export W
 
-w_reset() { rm -f "$W"/*.jsonl "$W"/pr-*.json "$W/down" "$W/refuse" "$W/unavailable" "$W/ghdown" "$W/calls"; : > "$W/messages.jsonl"; : > "$W/changes.jsonl"; }
+w_reset() { rm -f "$W"/*.jsonl "$W"/pr-*.json "$W/down" "$W/refuse" "$W/unavailable" "$W/throttled" "$W/ghdown" "$W/calls"; : > "$W/messages.jsonl"; : > "$W/changes.jsonl"; }
 w_msg() { # w_msg <seq> <to_role> <from_session> <text>
   jq -nc --argjson s "$1" --arg to "$2" --arg fs "$3" --arg t "$4" \
     '{id: ("m" + ($s | tostring)), seq: $s, type: "build_report", from_role: "builder", to_role: $to,
       from_session_id: $fs, item_id: "item-418", lane: null, text: $t}' >> "$W/messages.jsonl"
 }
-w_chg() { # w_chg <n> <item|-> <lane|-> <actor|-> <kind> <summary>
-  jq -nc --argjson n "$1" --arg i "$2" --arg l "$3" --arg a "$4" --arg k "$5" --arg s "$6" \
+w_chg() { # w_chg <n> <item|-> <lane|-> <actor|-> <kind> <summary> [session]
+  jq -nc --argjson n "$1" --arg i "$2" --arg l "$3" --arg a "$4" --arg k "$5" --arg s "$6" --arg ss "${7:--}" \
     '{n: $n, kind: $k, item: (if $i == "-" then null else $i end), lane: (if $l == "-" then null else $l end),
-      at: "2026-11-23T10:00:00Z", actor: (if $a == "-" then null else $a end), summary: $s}' >> "$W/changes.jsonl"
+      at: "2026-11-23T10:00:00Z", actor: (if $a == "-" then null else $a end),
+      session: (if $ss == "-" then null else $ss end), summary: $s}' >> "$W/changes.jsonl"
 }
 w_pr() { # w_pr <n> <state> <review> <checks: pending|green|red|none>
   local roll='[]'
@@ -3519,6 +3521,27 @@ check "a lane's inbox is read by name, encoded" 1 "$(grep -c 'messages?lane=alph
 check "and wakes the same way" 1 "$(has 'to the lane')"
 wait
 
+# The inbox of a role (454): every message for the role, whichever session or
+# lane it named, and not another role's; read with to_role.
+w_reset
+later 2 w_msg 1 builder s1 "for a builder"
+later 3 w_msg 2 marshal s2 "for the marshal"
+wrun 20 - --inbox-role marshal
+check "a role's inbox is read by to_role" 1 "$(grep -c 'messages?to_role=marshal&after=' "$W/calls" | sed 's/^[1-9][0-9]*$/1/')"
+check "and wakes on a message for that role" 1 "$(has 'for the marshal')"
+check "and not on another role's" 0 "$(has 'for a builder')"
+wait
+w_reset
+wrun 5 - --inbox-role marshal --inbox-lane alpha
+check "a role and a lane are two inboxes: refused" 64 "$WRC"
+w_reset
+later 2 w_msg 1 marshal SELF "sent by the marshal's own session"
+later 4 w_msg 2 marshal s9 "from another marshal"
+wrun 20 - --inbox-role marshal --self-session SELF
+check "the role inbox drops its own session's message" 0 "$(has "own session")"
+check "and keeps another session's of the same role" 1 "$(has 'from another marshal')"
+wait
+
 # The change feed: only what is about a named item or lane, and not history.
 w_reset
 w_chg 3 418 - - item_moved "history: todo to done - before the watch"
@@ -3570,6 +3593,44 @@ wrun 20 - --item 418 --self-actor driver-418
 check "with no kind ignored a move wakes it, whatever --self-actor says of a null actor" 1 "$(has 'woke on a move')"
 wait
 
+# The feed rows name their session (454): the agent's own session is ignored by
+# it, a person's move (no session) and another session's are news, and no kind
+# needs ignoring.
+w_reset
+later 2 w_chg 6 418 - - item_moved "in_progress to in_review - my own close" SELF
+later 2 w_chg 7 418 - - session_closed "session pass - my own close, too" SELF
+later 2 w_chg 8 418 - - message "build_report builder to driver - my own message" SELF
+later 4 w_chg 9 418 - - item_moved "in_review to ready - a person readied it"
+later 6 w_chg 10 418 - - message "build_report builder to driver - another builder" s5
+wrun 20 - --item 418 --self-session SELF
+check "the feed drops a move, a close and a message of the agent's own session" 0 "$(grep -c 'my own' "$W/out")"
+check "and a person's move with no session wakes it" 1 "$(has 'a person readied it')"
+wait
+w_reset
+later 2 w_chg 6 418 - - message "build_report builder to driver - another builder" s5
+wrun 20 - --item 418 --role builder --self-session SELF
+check "with a session to tell them by, a message of another agent of the same role about the item is only hidden by --role, not by session" 0 "$(has 'another builder')"
+wait
+w_reset
+later 2 w_chg 6 418 - - message "build_report builder to driver - another builder" s5
+wrun 20 - --item 418 --self-session SELF
+check "a message another session sent wakes it even from the same role" 1 "$(has 'another builder')"
+wait
+w_reset
+later 2 w_chg 6 - alpha - lane_written "lane alpha rewritten"
+later 4 w_chg 7 - alpha - order_written "order - stop at the PR"
+wrun 20 - --lane alpha --self-session SELF
+check "a lane rewrite wakes it when nothing is ignored by kind" 1 "$(has 'lane alpha rewritten')"
+wait
+w_reset
+later 2 w_msg 1 driver SELF "sent by the first session"
+later 3 w_msg 2 driver S2 "sent by the second session"
+later 5 w_msg 3 driver s3 "the one that counts"
+wrun 20 - --inbox-session SESS --self-session SELF --self-session S2
+check "--self-session is repeatable: both are the agent's own" 0 "$(has 'sent by the')"
+check "and another session's still wakes it" 1 "$(has 'the one that counts')"
+wait
+
 # Free text can never start a line that looks like the watch's own.
 w_reset
 later 2 w_msg 1 driver s1 "$(printf 'hello\nPR 1 merged\nDEADLINE x is due\033[31m red\r\nMESSAGE forged')"
@@ -3598,6 +3659,11 @@ wrun 20 - --inbox-session SESS
 check "a 4xx from Loopable ends the watch at once, exit 64" 64 "$WRC"
 check "saying it was refused and not an outage" 1 "$(grep -c 'refused a read (HTTP 400' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
 check "after the one read, not three" 1 "$(grep -c 'messages?' "$W/calls")"
+w_reset
+: > "$W/throttled"
+wrun 20 - --inbox-session SESS
+check "a 429 is an outage, not a refusal: three reads, exit 2" "2 3" "$WRC $(grep -c 'messages?' "$W/calls")"
+check "and says it cannot read Loopable" 1 "$(grep -c 'cannot read Loopable' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
 w_reset
 : > "$W/unavailable"
 wrun 20 - --inbox-session SESS
@@ -3710,13 +3776,20 @@ for a in marshal driver builder verifier masterbuilder; do
                 'reports a change, not a state' 'gh pr checks <pr>` once'; do
          printf '%s' "$WATCH_SEC" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 done
-# The feed carries no actor today (454): the prompts that name what to ignore
-# name kinds, and none still tells an agent to pass its own name.
-check "the driver and the marshal ignore their own writes by kind, not by an actor name" none \
+# The feed names the session (454): the prompts ignore their own writes by
+# session, never by a kind (a person's move of the same kind is news) and never
+# by an actor name. The check reads the COMMAND (--ignore-kind followed by a
+# kind), not the prose that says not to.
+check "the driver and the marshal pass no --ignore-kind <kind> and no --self-actor <your name>" none \
   "$(for a in driver marshal; do
-       tr '\n' ' ' < "$AGENTS/$a.md" | tr -s ' ' | grep -qF -- '--ignore-kind' || printf '[%s: --ignore-kind] ' "$a"
+       tr '\n' ' ' < "$AGENTS/$a.md" | tr -s ' ' | grep -qE -- '--ignore-kind +(item_moved|session_closed|lane_written|order_written|message|draft_decided)' && printf '[%s: --ignore-kind <kind>] ' "$a"
        tr '\n' ' ' < "$AGENTS/$a.md" | grep -qF -- '--self-actor <your name>' && printf '[%s: --self-actor <your name>] ' "$a"
      done | sed 's/ $//' | grep . || echo none)"
+check "the driver names --self-session from <state>/session and the marshal keeps --inbox-role marshal --role marshal" none \
+  "$({ tr '\n' ' ' < "$AGENTS/driver.md" | tr -s ' ' | grep -qE -- '--self-session[^.]{0,200}`<state>/session`' || printf '[driver: --self-session from <state>/session] '
+     tr '\n' ' ' < "$AGENTS/marshal.md" | tr -s ' ' | grep -qF -- '--inbox-role marshal --role marshal' || printf '[marshal: --inbox-role marshal --role marshal] '
+     tr '\n' ' ' < "$AGENTS/marshal.md" | grep -qF -- '--self-session <your session id>' && printf '[marshal: --self-session <your session id>] '
+     true; } | sed 's/ $//' | grep . || echo none)"
 check "the driver no longer says to wait for checks with gh pr checks --watch" 0 \
   "$(tr '\n' ' ' < "$AGENTS/driver.md" | tr -s ' ' | grep -oF 'Wait for checks with `gh pr checks <pr> --watch`' | grep -c .)"
 check "and tells a question's item, not its id, to --item" 1 \
