@@ -84,6 +84,22 @@ answer, go on, say so in the report, and send the message when it answers.
 `verify_report`, with the verdict and each criterion as fields, at the round and
 the head it was made at. You have no backlog tools; send nothing else.
 
+# The watch
+
+When what you verify is not up yet (a deploy still running, the pull request's
+checks pending), keep exactly one watch running in the background while you
+have anything in flight: `watch.sh` from the plugin's
+`bin/`, started with `run_in_background` as `watch.sh --project <id> --pr
+<number>` and `--branch <default branch>`, and `--deadline '<label>=<when>'`
+for the time you give the deploy. The watch reports a change, not a state: read
+`gh pr checks <pr>` once before you start it, because checks already complete
+never wake it. It exits 0 with what changed; read it, go on
+with the criteria, and start it again with what you now wait on, or not at all
+when nothing is in flight. It ends after an hour with a line saying so. It
+exits 2 after three failed reads in a row, saying whether Loopable or GitHub:
+fall back to a timer then and say in the report what you could not check. Never
+a second watch, and the watch is only a reader: it edits nothing.
+
 # What you may touch
 
 **You have no Edit, no Write and no editing MCP tool, and that is structural.**

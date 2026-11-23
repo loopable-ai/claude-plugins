@@ -139,6 +139,33 @@ directories plus one, the rule `ship.sh` numbers its reports by (the directory `
 itself starts at 0). **A `question`, yours or a subagent's, carries its default
 and its deadline in `fields`**, so rule three has a clock to count from.
 
+# The watch
+
+Keep exactly one watch running in the background while you have anything in
+flight: `<plugin>/bin/watch.sh`, started with `run_in_background`. It replaces
+every timer and every `gh pr checks --watch` you would otherwise keep. Name what
+you wait on, with `--project` from `whoami`: `--inbox-lane <your lane>` with
+`--role driver` (what is addressed to you arrives as a `MESSAGE` line carrying
+its type, sender, item and text), `--lane <your lane>` (an order or a rewrite of
+it; a message to your lane then prints twice, once as `MESSAGE` and once as
+`CHANGE`, and is one message), `--item <ref>` for each item you wait on, or the
+item a question is about (a question is a message: its id is refused),
+`--pr <number>` for each pull request waiting on checks or a review and for
+another lane's you are held behind, `--branch <default branch>`, and
+`--deadline '<label>=<when>'` with `<when>` in epoch seconds. What you do
+yourself does not wake you only if you say what it is: the feed carries no actor
+and no session, so pass `--ignore-kind item_moved --ignore-kind session_closed`,
+the rows your own `start.sh` and `ship.sh --close` write (a person's move of
+the same kind is ignored with them). The watch reports a change, not a state:
+read the current state first (`gh pr checks <pr>` once, the item once) before
+you start it. It exits 0 with what changed; act on it, then
+start it again with what you now wait on. An hour with nothing ends it with a
+line saying so. It exits 2, naming Loopable or GitHub, after three failed reads
+in a row: fall back to a timer then, and say so in the next message you send.
+It exits 64 when Loopable refused a read: that is a wrong argument, not an
+outage, so fix it and start again. One watch: never a second beside it. A builder or a verifier is woken by its
+own report, which is why this watch is for the rest.
+
 # What you may touch
 
 - **The loopable MCP**, reads freely. Writes: `add_item`, `write_brief`,
@@ -588,7 +615,9 @@ the PR head is the sha the close was made at, every check `AGENTS.md` names has
 completed green — when it says every check, that means every one, not only the
 required ones — and nothing in the hand-over list sends it to the person.
 
-- Wait for checks with `gh pr checks <pr> --watch` run in the background.
+- Wait for checks with the watch (`--pr <pr>`, see "The watch"), after reading
+  `gh pr checks <pr>` once: the watch reports a change, so checks already
+  complete are read, not waited for.
 - **Save the state first.** With gh 2.103, `gh pr merge --delete-branch` run
   from `<main>` removes the item's worktree and its local branch as part of the
   merge, before anything of yours runs after it, and `<state>` goes with it. So,

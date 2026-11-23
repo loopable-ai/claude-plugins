@@ -3376,6 +3376,333 @@ check "the driver is told to write no status or handoffs file, and none of the o
 check "and says its status is the messages it sends" 1 \
   "$(printf '%s' "$LANE_STEP" | grep -cF 'Write no separate status and no handoffs file' | sed 's/^[1-9][0-9]*$/1/')"
 
+# --- the watch (418) -------------------------------------------------------
+# plugin/bin/watch.sh against a stub Loopable (curl) and a stub gh, both in
+# their own directory ahead on PATH. The API keeps files: an inbox of
+# messages with a seq, a feed of changes with a number, one json per pull
+# request, one list of runs. A case starts the watch, changes a file a couple
+# of seconds later and reads what the watch printed and how it exited. The
+# watch polls every second here (LOOPABLE_WATCH_EVERY) where it polls every 30
+# in life. `timeout` is the hang guard: exit 124 is a watch that never woke.
+echo
+echo " the watch (418):"
+WATCH="$HERE/../bin/watch.sh"
+W=$(mktemp -d)
+cat > "$W/curl" <<'CURL'
+#!/usr/bin/env bash
+# The API: messages after a seq, changes after a number, narrowed by what was
+# named, the way the routes narrow them (a row passes when it is about a named
+# item or a named lane). The URL is the last argument; every one is logged.
+url="${@: -1}"
+echo "$url" >> "$W/calls"
+[ -e "$W/down" ] && exit 7
+# curl without -f answers with the status after the body when asked with -w;
+# a refusal is the API's own 4xx, a 503 is an outage.
+[ -e "$W/refuse" ] && { printf '{"message":"items are refs"}\n400'; exit 0; }
+[ -e "$W/unavailable" ] && { printf '{"message":"asleep"}\n503'; exit 0; }
+q="${url#*\?}"; [ "$q" = "$url" ] && q=""
+param() { local v; v=$(printf '%s' "$q" | tr '&' '\n' | sed -n "s/^$1=//p" | head -1); v=${v//+/ }; printf '%b' "${v//%/\\x}"; }
+case "$url" in
+  */messages\?*)
+    jq -s --argjson a "$(param after)" '
+      map(select(.seq > $a)) as $m | {messages: $m, cursor: (($m | map(.seq) | max) // $a)}' "$W/messages.jsonl" ;;
+  */changes)
+    echo '{"changes":[],"cursor":"5","more":false,"limit":100}' ;;
+  */changes\?*)
+    jq -s --argjson c "$(param cursor)" --arg items "$(param items)" --arg lanes "$(param lanes)" '
+      map(. as $x | select($x.n > $c
+                 and ((($items | split(",")) | index($x.item // "")) != null
+                      or (($lanes | split(",") | map(ascii_downcase)) | index(($x.lane // "") | ascii_downcase)) != null))) as $r
+      | {changes: $r, cursor: ((($r | map(.n) | max) // $c) | tostring), more: false}' "$W/changes.jsonl" ;;
+  *) printf '{}\n404'; exit 0 ;;
+esac
+printf '\n200'
+CURL
+cat > "$W/gh" <<'GH'
+#!/usr/bin/env bash
+[ -e "$W/ghdown" ] && exit 1
+case "$*" in
+  "pr view "*) cat "$W/pr-$3.json" ;;
+  "run list "*) cat "$W/runs.json" ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$W/curl" "$W/gh"
+export W
+
+w_reset() { rm -f "$W"/*.jsonl "$W"/pr-*.json "$W/down" "$W/refuse" "$W/unavailable" "$W/ghdown" "$W/calls"; : > "$W/messages.jsonl"; : > "$W/changes.jsonl"; }
+w_msg() { # w_msg <seq> <to_role> <from_session> <text>
+  jq -nc --argjson s "$1" --arg to "$2" --arg fs "$3" --arg t "$4" \
+    '{id: ("m" + ($s | tostring)), seq: $s, type: "build_report", from_role: "builder", to_role: $to,
+      from_session_id: $fs, item_id: "item-418", lane: null, text: $t}' >> "$W/messages.jsonl"
+}
+w_chg() { # w_chg <n> <item|-> <lane|-> <actor|-> <kind> <summary>
+  jq -nc --argjson n "$1" --arg i "$2" --arg l "$3" --arg a "$4" --arg k "$5" --arg s "$6" \
+    '{n: $n, kind: $k, item: (if $i == "-" then null else $i end), lane: (if $l == "-" then null else $l end),
+      at: "2026-11-23T10:00:00Z", actor: (if $a == "-" then null else $a end), summary: $s}' >> "$W/changes.jsonl"
+}
+w_pr() { # w_pr <n> <state> <review> <checks: pending|green|red|none>
+  local roll='[]'
+  case "$4" in
+    pending) roll='[{"status":"IN_PROGRESS","conclusion":""},{"status":"COMPLETED","conclusion":"SUCCESS"}]' ;;
+    green) roll='[{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"COMPLETED","conclusion":"SKIPPED"}]' ;;
+    red) roll='[{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"COMPLETED","conclusion":"FAILURE"}]' ;;
+  esac
+  printf '{"state":"%s","reviewDecision":"%s","statusCheckRollup":%s}\n' "$2" "$3" "$roll" > "$W/pr-$1.json"
+}
+w_runs() { # w_runs <json array of runs, newest first>
+  printf '%s\n' "$1" > "$W/runs.json"
+}
+# wrun <timeout> <env assignments as one string, or -> <watch args...>
+# stdout in $W/out, stderr in $W/err, the exit code in WRC, seconds in WSEC.
+wrun() {
+  local t=$1 envs=$2; shift 2
+  local t0; t0=$(date +%s)
+  env LOOPABLE_TOKEN=t LOOPABLE_API_URL=http://stub PATH="$W:$PATH" \
+      LOOPABLE_WATCH_EVERY=1 LOOPABLE_WATCH_GH_EVERY=1 ${envs/#-/} \
+      timeout "$t" "$WATCH" --project P "$@" > "$W/out" 2> "$W/err"
+  WRC=$?; WSEC=$(( $(date +%s) - t0 ))
+}
+# After <seconds>, run the rest of the arguments in the background.
+later() { local s=$1; shift; ( sleep "$s"; "$@" ) & }
+has() { grep -cF -- "$1" "$W/out" | sed 's/^[1-9][0-9]*$/1/'; }
+
+w_reset
+# A message addressed to the inbox wakes it, within the time the poll allows,
+# and the wake prints the type, the sender, the item and the text.
+w_msg 1 driver s0 "old news before the watch started"
+later 2 w_msg 2 driver s1 "the verifier found one thing"
+wrun 20 - --inbox-session SESS --role driver
+check "a message to the inbox wakes the watch, exit 0" 0 "$WRC"
+check "within seconds, far inside the 90 the item asks" ok "$([ "$WSEC" -le 8 ] && echo ok || echo "took ${WSEC}s")"
+check "and prints its type" 1 "$(has 'MESSAGE build_report')"
+check "its sender" 1 "$(has 'from builder to driver')"
+check "its item" 1 "$(has 'item item-418')"
+check "its text" 1 "$(has 'the verifier found one thing')"
+check "a message from before the watch started is not replayed" 0 "$(has 'old news')"
+check "it read the inbox it was given, by session" 1 "$(grep -c 'messages?session=SESS&after=' "$W/calls" | sed 's/^[1-9][0-9]*$/1/')"
+wait
+
+# Another role's message, and the agent's own session's, do not wake it.
+w_reset
+later 2 w_msg 1 builder s1 "for a builder, not for this driver"
+later 3 w_msg 2 driver SELF "sent by this very session"
+later 5 w_msg 3 driver s2 "the one that counts"
+wrun 20 - --inbox-session SESS --role driver --self-session SELF
+check "a message for another role stays silent" 0 "$(has 'not for this driver')"
+check "so does one this agent's own session sent" 0 "$(has 'this very session')"
+check "and the next real one wakes it" 1 "$(has 'the one that counts')"
+wait
+w_reset
+later 2 w_msg 1 driver s1 "to the lane"
+wrun 20 - --inbox-lane "alpha lane"
+check "a lane's inbox is read by name, encoded" 1 "$(grep -c 'messages?lane=alpha%20lane&after=' "$W/calls" | sed 's/^[1-9][0-9]*$/1/')"
+check "and wakes the same way" 1 "$(has 'to the lane')"
+wait
+
+# The change feed: only what is about a named item or lane, and not history.
+w_reset
+w_chg 3 418 - - item_moved "history: todo to done - before the watch"
+later 2 w_chg 6 999 - - item_moved "todo to done - somebody else's item"
+later 2 w_chg 7 - beta - lane_written "lane beta rewritten"
+later 4 w_chg 8 418 - - item_moved "in_progress to in_review - mine"
+wrun 20 - --item 418 --lane alpha
+check "a move of a named item wakes the watch, exit 0" 0 "$WRC"
+check "and prints the change" 1 "$(has 'CHANGE item_moved item 418')"
+check "with its summary" 1 "$(has 'in_progress to in_review - mine')"
+check "a change about another item stays silent" 0 "$(has "somebody else's item")"
+check "so does a lane nobody named" 0 "$(has 'lane beta rewritten')"
+check "and history before the watch's cursor" 0 "$(has 'before the watch')"
+check "the feed was asked with the named items and lanes" 1 "$(grep -c 'changes?cursor=5&items=418&lanes=alpha' "$W/calls" | sed 's/^[1-9][0-9]*$/1/')"
+wait
+w_reset
+later 2 w_chg 6 - Alpha - lane_written "lane alpha rewritten"
+wrun 20 - --item 418 --lane alpha
+check "a rewrite of a named lane wakes it" 1 "$(has 'CHANGE lane_written item - lane Alpha')"
+wait
+w_reset
+later 2 w_chg 6 418 - - message "build_report builder to driver - mine, sent by this role"
+later 4 w_chg 8 418 - - message "verify_report verifier to driver - for me"
+wrun 20 - --item 418 --role builder
+check "a message this role sent is not news to it" 0 "$(has 'sent by this role')"
+check "another role's message about the item wakes it" 1 "$(has 'verify_report verifier to driver')"
+wait
+w_reset
+later 2 w_chg 6 418 - Self item_moved "moved by this agent's own token"
+later 4 w_chg 8 418 - Other item_moved "moved by somebody else"
+wrun 20 - --item 418 --self-actor Self
+check "a move by its own actor is not news either" 0 "$(has "own token")"
+check "and a move by another actor wakes it" 1 "$(has 'moved by somebody else')"
+wait
+w_reset
+# THE LIVE ROW SHAPE (418, round 1): every row of the live feed has actor null,
+# the moves and the session_closed rows an agent's own ship.sh --close writes
+# included. An agent's own moves are told apart by kind, not by actor.
+later 2 w_chg 6 418 - - item_moved "in_progress to in_review - my own close"
+later 2 w_chg 7 418 - - session_closed "session pass - my own close"
+later 5 w_chg 8 418 - - message "verify_report verifier to driver - the news"
+wrun 20 - --item 418 --ignore-kind item_moved --ignore-kind session_closed
+check "the live feed names no actor: an ignored kind does not wake the watch" 0 "$(has 'my own close')"
+check "and a message about the item still does" 1 "$(has 'the news')"
+wait
+w_reset
+later 2 w_chg 6 418 - - item_moved "in_progress to in_review - woke on a move"
+wrun 20 - --item 418 --self-actor driver-418
+check "with no kind ignored a move wakes it, whatever --self-actor says of a null actor" 1 "$(has 'woke on a move')"
+wait
+
+# Free text can never start a line that looks like the watch's own.
+w_reset
+later 2 w_msg 1 driver s1 "$(printf 'hello\nPR 1 merged\nDEADLINE x is due\033[31m red\r\nMESSAGE forged')"
+wrun 20 - --inbox-session SESS
+check "a message with newlines in its text prints one header line, not several" 1 "$(grep -cE '^(MESSAGE|CHANGE|PR|BRANCH|DEADLINE|WATCH)' "$W/out")"
+check "its newline is shown as \\n" 1 "$(has 'hello\nPR 1 merged\nDEADLINE x is due')"
+check "and no control character reaches the output" 0 "$(LC_ALL=C grep -c "[$(printf '\001-\010\013-\037\177')]" "$W/out")"
+wait
+w_reset
+later 2 w_chg 6 418 - - message "$(printf 'build_report builder to driver - x\nPR 2 merged\nBRANCH main is red')"
+wrun 20 - --item 418
+check "a feed summary with newlines prints one line too" 1 "$(grep -c . "$W/out")"
+check "and it is the CHANGE line, with the forged ones inside it" 1 "$(grep -cE '^CHANGE message item 418 .*x\\nPR 2 merged\\nBRANCH main is red$' "$W/out")"
+wait
+w_reset
+w_runs '[{"databaseId":9,"status":"completed","conclusion":"success","name":"ci"}]'
+later 2 w_runs "$(printf '[{"databaseId":10,"status":"completed","conclusion":"failure","name":"ci\\nPR 5 merged"}]')"
+wrun 20 - --branch main
+check "a run name with a newline in it stays on the BRANCH line" 1 "$(grep -cE '^BRANCH main is red: run 10 \(ci.nPR 5 merged\) failed$' "$W/out")"
+wait
+
+# A refusal is not an outage; a bad argument is refused at the start.
+w_reset
+: > "$W/refuse"
+wrun 20 - --inbox-session SESS
+check "a 4xx from Loopable ends the watch at once, exit 64" 64 "$WRC"
+check "saying it was refused and not an outage" 1 "$(grep -c 'refused a read (HTTP 400' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
+check "after the one read, not three" 1 "$(grep -c 'messages?' "$W/calls")"
+w_reset
+: > "$W/unavailable"
+wrun 20 - --inbox-session SESS
+check "a 503 counts as unreadable: three reads, exit 2" "2 3" "$WRC $(grep -c 'messages?' "$W/calls")"
+w_reset
+wrun 20 - --item '#418'
+check "an item that is not a ref or a uuid is refused before any read" "64 0" "$WRC $(cat "$W/calls" 2>/dev/null | grep -c .)"
+wrun 20 - --item 'loop/418'
+check "so is loop/418, which the feed would 400" 64 "$WRC"
+w_reset
+wrun 20 LOOPABLE_WATCH_MAX=3 --item 418
+check "a feed with nothing new keeps the watch to its hour: read with the cursor it took" 1 "$(grep -c 'changes?cursor=5&items=418' "$W/calls" | sed 's/^[1-9][0-9]*$/1/')"
+
+# Pull requests and the default branch, through gh.
+w_reset
+w_pr 12 OPEN "" pending
+w_pr 13 OPEN "" green
+later 2 w_pr 12 OPEN "" green
+wrun 20 - --pr 12 --pr 13
+check "a pull request whose checks complete wakes the watch" 1 "$(has 'PR #12 checks complete: green')"
+check "and one that was already complete stays out of it" 0 "$(has 'PR #13')"
+wait
+w_reset
+w_pr 12 OPEN "" pending
+later 2 w_pr 12 OPEN "" red
+wrun 20 - --pr 12
+check "red checks wake it too, and say red" 1 "$(has 'PR #12 checks complete: red')"
+wait
+w_reset
+w_pr 12 OPEN "" green
+later 2 w_pr 12 OPEN APPROVED green
+wrun 20 - --pr 12
+check "a review wakes it" 1 "$(has 'PR #12 review none -> APPROVED')"
+wait
+w_reset
+w_pr 12 OPEN APPROVED green
+later 2 w_pr 12 MERGED APPROVED green
+wrun 20 - --pr 12
+check "a merge wakes it" 1 "$(has 'PR #12 state OPEN -> MERGED')"
+wait
+w_reset
+w_pr 12 OPEN "" green
+wrun 20 LOOPABLE_WATCH_MAX=4 --pr 12
+check "a pull request that does not change leaves the watch to its limit" 1 "$(has 'WATCH ended')"
+w_reset
+w_runs '[{"databaseId":9,"status":"in_progress","conclusion":""},{"databaseId":8,"status":"completed","conclusion":"success","name":"ci"}]'
+later 2 w_runs '[{"databaseId":10,"status":"completed","conclusion":"failure","name":"ci"},{"databaseId":8,"status":"completed","conclusion":"success","name":"ci"}]'
+wrun 20 - --branch main
+check "the default branch turning red wakes the watch" 1 "$(has 'BRANCH main is red: run 10 (ci) failed')"
+wait
+w_reset
+w_runs '[{"databaseId":10,"status":"completed","conclusion":"failure","name":"ci"}]'
+wrun 20 LOOPABLE_WATCH_MAX=4 --branch main
+check "a branch already red at the start is not news" 1 "$(has 'WATCH ended')"
+w_reset
+w_runs '[{"databaseId":10,"status":"completed","conclusion":"failure","name":"ci"}]'
+later 2 w_runs '[{"databaseId":11,"status":"completed","conclusion":"failure","name":"ci"}]'
+wrun 20 - --branch main
+check "but a new red run on it is" 1 "$(has 'run 11')"
+wait
+
+# Deadlines, and the hour.
+w_reset
+wrun 20 - --deadline "budget 90m=$(( $(date +%s) + 3 ))" --deadline "question 12=$(( $(date +%s) + 3600 ))"
+check "a deadline wakes the watch at its time, exit 0" 0 "$WRC"
+check "saying which deadline" 1 "$(has 'DEADLINE budget 90m is due')"
+check "and not the one still ahead" 0 "$(has 'question 12')"
+check "at that time, not before" ok "$([ "$WSEC" -ge 2 ] && [ "$WSEC" -le 5 ] && echo ok || echo "took ${WSEC}s")"
+w_reset
+wrun 20 LOOPABLE_WATCH_MAX=3 --inbox-session SESS
+check "with nothing happening it ends at its limit, exit 0" 0 "$WRC"
+check "saying so" 1 "$(has 'WATCH ended: nothing happened')"
+check "the limit is an hour unless told otherwise" 1 "$(grep -c 'MAX="${LOOPABLE_WATCH_MAX:-3600}"' "$WATCH" | sed 's/^[1-9][0-9]*$/1/')"
+
+# When it cannot read.
+w_reset
+: > "$W/down"
+wrun 20 - --inbox-session SESS
+check "Loopable unreadable three times running ends it non-zero" 2 "$WRC"
+check "with a line saying which, and the timer" 1 "$(grep -c 'cannot read Loopable.*Fall back to a timer' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
+check "after three reads, not one" 3 "$(grep -c 'messages?' "$W/calls")"
+w_reset
+w_pr 12 OPEN "" green
+: > "$W/ghdown"
+wrun 20 - --pr 12
+check "GitHub unreadable three times running ends it non-zero" 2 "$WRC"
+check "with a line saying GitHub" 1 "$(grep -c 'cannot read GitHub.*Fall back to a timer' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
+w_reset
+: > "$W/down"
+later 1 rm -f "$W/down"
+wrun 20 LOOPABLE_WATCH_MAX=5 --inbox-session SESS
+check "two failed reads and then an answer do not end it" 0 "$WRC"
+check "it goes on to its limit" 1 "$(has 'WATCH ended')"
+wait
+w_reset
+env -u LOOPABLE_TOKEN LOOPABLE_TOKEN_FILE=/nonexistent PATH="$W:$PATH" "$WATCH" --project P --inbox-session SESS > "$W/out" 2> "$W/err"
+check "no token ends it at once, non-zero, saying so" "2 1" "$? $(grep -c 'no token' "$W/err" | sed 's/^[1-9][0-9]*$/1/')"
+"$WATCH" > "$W/out" 2> "$W/err"
+check "with nothing named it refuses to start" 64 "$?"
+rm -rf "$W"
+
+# THE PROMPTS (418): each of the five keeps exactly one watch in the
+# background while anything is in flight, and starts it again with what it now
+# waits on; on a failed read, a timer.
+for a in marshal driver builder verifier masterbuilder; do
+  WATCH_SEC=$(awk '/^# The watch$/ {f = 1; next} /^# / {f = 0} f' "$AGENTS/$a.md" 2>/dev/null | tr '\n' ' ' | tr -s ' ')
+  check "$a keeps one watch in the background while anything is in flight" none \
+    "$(for w in 'watch.sh' 'exactly one watch' 'in the background' 'anything in flight' \
+                'start it again with what you now wait on' 'fall back to a timer' \
+                'reports a change, not a state' 'gh pr checks <pr>` once'; do
+         printf '%s' "$WATCH_SEC" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+done
+# The feed carries no actor today (454): the prompts that name what to ignore
+# name kinds, and none still tells an agent to pass its own name.
+check "the driver and the marshal ignore their own writes by kind, not by an actor name" none \
+  "$(for a in driver marshal; do
+       tr '\n' ' ' < "$AGENTS/$a.md" | tr -s ' ' | grep -qF -- '--ignore-kind' || printf '[%s: --ignore-kind] ' "$a"
+       tr '\n' ' ' < "$AGENTS/$a.md" | grep -qF -- '--self-actor <your name>' && printf '[%s: --self-actor <your name>] ' "$a"
+     done | sed 's/ $//' | grep . || echo none)"
+check "the driver no longer says to wait for checks with gh pr checks --watch" 0 \
+  "$(tr '\n' ' ' < "$AGENTS/driver.md" | tr -s ' ' | grep -oF 'Wait for checks with `gh pr checks <pr> --watch`' | grep -c .)"
+check "and tells a question's item, not its id, to --item" 1 \
+  "$(for a in driver marshal; do tr '\n' ' ' < "$AGENTS/$a.md" | tr -s ' ' | grep -qF 'the item a question is about' && echo y; done | grep -c y | sed 's/^2$/1/')"
+
 # --- the two version checks (335) -----------------------------------------
 echo
 echo "check-version"

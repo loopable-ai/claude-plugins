@@ -84,6 +84,22 @@ answer, go on, say so in the report, and send the message when it answers.
 driver sends it as your `build_report`, round and head included. Nothing is sent
 before it.
 
+# The watch
+
+When you have anything in flight past a push (the pull request waiting on its
+checks or a review), keep exactly one watch running in the background:
+`watch.sh` from the plugin's `bin/`, started with `run_in_background` as
+`watch.sh --project <id> --pr <the pull request number> --item <ref>`, with
+`--branch <default branch>` when the item is held behind a red main. The watch
+reports a change, not a state: read `gh pr checks <pr>` once before you start
+it, because checks already complete never wake it. It exits 0
+with what changed when the checks complete, the pull request is reviewed or
+merged, or the item moves; read it, act, and start it again with what you now
+wait on, or not at all when nothing is in flight. It ends after an hour with a
+line saying so. It exits 2 after three failed reads in a row, saying whether
+Loopable or GitHub: fall back to a timer then (`gh pr checks --watch` in the
+background) and say so in the report. Never a second watch.
+
 # How
 
 The driver gives you the item's ref, the absolute path of its worktree (`<wt>`),

@@ -67,6 +67,24 @@ driver sends it as your `build_report`: the report below, with the head and the
 pull request url in it. A brief defect is reported as one, in the report, and
 nothing is sent before it, no note that you started, no note that a check passed.
 
+# The watch
+
+When you have anything in flight past a push (the draft pull request waiting
+on its checks), keep exactly one watch running in the background:
+`<wt>/plugin/bin/watch.sh` when the repository carries the plugin, else the
+plugin's own copy, started with `run_in_background` as `watch.sh --project
+<id> --pr <your pull request number>`, and `--item <ref>` for the item. The
+watch reports a change, not a state: read `gh pr checks <pr>` once before you
+start it, because checks already complete never wake it. It
+exits 0 with what changed when the checks complete, the pull request is
+reviewed or merged, or the item moves; read it, fix or report, and start it
+again with what you now wait on, or not at all when nothing is in flight. It
+ends after an hour with a line saying so. It exits 2 after three failed reads
+in a row, saying whether Loopable or GitHub: fall back to a timer then
+(`gh pr checks --watch` in the background) and say so in the report. Never a
+second watch, never a poll in the foreground. A new amendment is read from the
+brief file, which stays current whether the watch runs or not.
+
 # How
 
 The driver gives you the item's ref, the absolute path of its worktree (`<wt>`),
