@@ -30,7 +30,7 @@ describe reasoning; the backlog says what is left to do.
 | `neighbourhood` | what is around a node, one or two hops, filtered by relation. Orientation before building. |
 | `path` | how two things relate — the shortest route between them. `found: false` means no route **you may see**. |
 | `add_item` | work the studio has decided to do. The backlog is the studio's own; a member writing in it is a member doing their job. |
-| `propose` | something **somebody else** asked for, or a **new feature** (a surface). It goes to the approval queue for a person to accept, reword or decline. |
+| `propose` | something **somebody else** asked for. It goes to the approval queue for a person to accept, reword or decline. |
 | `revise` | fix an item's title or body. Not its visibility, kind or parent. |
 | `link_items` | this must be done before that |
 | `ask_studio` | a question a person has to answer, into the escalations inbox |

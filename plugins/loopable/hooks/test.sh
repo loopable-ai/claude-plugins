@@ -2037,6 +2037,14 @@ check "the blockers are posted as one activity"      1 "$(sent POST '/sessions/s
 AB=$(grep 'activities' "$STUB_CALLS" | tail -1 | cut -f3)
 check "  naming the first blocker"                   1 "$(printf '%s' "$AB" | grep -c 'nothing to verify against')"
 check "  and the second"                             1 "$(printf '%s' "$AB" | grep -c 'needs an environment to run against')"
+# no_feature (473) is a warning printed as a sentence, never the raw code.
+pack_blocked; sed -i 's/"no_environment"/"no_environment","no_feature"/' "$STUB_PACK"
+git -C "$SRT" worktree remove --force "$(wt_of "story/nobody-has-groomed-this-${TODO%%-*}")" 2>/dev/null
+git -C "$SRT" branch -D "story/nobody-has-groomed-this-${TODO%%-*}" >/dev/null 2>&1
+run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "no_feature is printed as a sentence"          1 "$(printf '%s\n' "$OUT" | grep -c 'names no feature')"
+check "and never as the raw code"                    0 "$(printf '%s\n' "$OUT" | grep -c 'no_feature')"
+pack_blocked
 # Takes its worktree back out so what follows starts as it did.
 git -C "$SRT" worktree remove --force "$(wt_of "story/nobody-has-groomed-this-${TODO%%-*}")" 2>/dev/null
 git -C "$SRT" branch -D "story/nobody-has-groomed-this-${TODO%%-*}" >/dev/null 2>&1
@@ -3254,6 +3262,31 @@ check "it reads and files through the loopable MCP" none \
   "$(for w in '`list_backlog`' 'titles_only' '`get_item`' '`pull_item`' '`ready_blockers`' \
               '`add_item`' '`revise`' '`write_brief`' '`link_items`'; do
        grep -qF -- "$w" "$MARSHAL" 2>/dev/null || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
+# THE FEATURE MAP (474): the audit's two checks, the tag on every item filed, and
+# no_feature as a warning that does not make an item not Ready.
+flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+check "the marshal audits items with no feature" 1 \
+  "$(flat "$MARSHAL" | grep -cF 'open stories, tasks and bugs that name no feature')"
+check "the marshal audits features the merged work has passed" 1 \
+  "$(flat "$MARSHAL" | grep -cF 'features whose status the merged work has passed')"
+check "the marshal tags, writes the status with the features tool and reports it" none \
+  "$(for w in '`feature_ids`' '`features` tool' 'which statuses you wrote'; do
+       flat "$MARSHAL" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | grep . || echo none)"
+check "the marshal's Ready rule does not count no_feature" 1 \
+  "$(flat "$MARSHAL" | grep -cF 'a `no_feature` entry is a warning like the others')"
+check "marshal, driver and plan: the new sentences, words absent before 474" none \
+  "$(for f in "$MARSHAL" "$AGENTS/driver.md" "$PLAN"; do
+       for w in 'kind and owner' 'is tagged to a feature' '`feature_ids` on `add_item`' 'features` tool, with its kind' ; do
+         flat "$f" | grep -qiF -- "$w" || printf '[%s: %s] ' "$(basename "$(dirname "$f")")/$(basename "$f")" "$w"; done; done | grep . || echo none)"
+check "the eval stand-in gives no_feature to a story with feature_count 0 and to nothing else" \
+  "story:['no_brief', 'no_verifiable_criterion', 'no_feature'] tagged:['no_brief', 'no_verifiable_criterion'] nocount:['no_brief', 'no_verifiable_criterion'] epic:['no_brief', 'no_verifiable_criterion']" \
+  "$(PYTHONDONTWRITEBYTECODE=1 python3 -c '
+import sys; sys.path.insert(0, sys.argv[1])
+from backlog import Backlog
+b = Backlog.__new__(Backlog); b.s = {"environments": []}
+def r(kind, **k): return b.blockers({"kind": kind, "brief_rev": 0, "criteria": [], **k})
+print("story:%s tagged:%s nocount:%s epic:%s" % (r("story", feature_count=0), r("story", feature_count=2), r("story"), r("epic", feature_count=0)))
+' "$HERE/../evals/_lib")"
 check "and never through GitHub issues" none \
   "$( [ -f "$MARSHAL" ] || { echo missing; exit; }
      grep -oE 'gh (issue|label|api orgs)[a-z/ -]*|closingIssuesReferences|\.fountain/' "$MARSHAL" |
@@ -3856,6 +3889,61 @@ for s in plugin mcp; do
   # Main's own later change and bump are not the branch's.
   check "$s: main bumped and the branch untouched passes" pass "$(vcheck "$s" ahead untouched)"
 done
+
+# --- a fact a criterion asks to be stated (458) -----------------------------
+# Nobody may edit a pull request's body after the first push, so a criterion
+# "the PR states the count" failed every fix round whose code was right (453 on
+# PR 155, 449 on PR 159). The one place is the builder's build report for the
+# head. Each role's text is pinned, and the 453 shape is replayed as a fixture:
+# no model runs here, so the replay applies the verifier's rule as the text
+# gives it, to the three documents it names.
+echo
+echo " a stated fact is read from the build report, not the PR body (458):"
+SK="$HERE/../skills/plan/SKILL.md"
+has_all() { # has_all <file> <phrase>...  -> 1 when every phrase is in the file, whitespace folded
+  local f=$1 t; shift
+  t=$(tr '\n' ' ' < "$f" | tr -s ' ')
+  for p in "$@"; do case "$t" in *"$p"*) ;; *) echo 0; return;; esac; done
+  echo 1
+}
+check "verifier: a stated fact is read from the newest build report for the head" 1 \
+  "$(has_all "$AGENTS/verifier.md" 'is read from the build report' "newest build report for the head you verify")"
+check "verifier: an out-of-date PR body is a note, never a failed criterion" 1 \
+  "$(has_all "$AGENTS/verifier.md" 'out of date is a note in your report, never a failed criterion')"
+for a in builder masterbuilder; do
+  check "$a: every round's report restates the facts for its head" 1 \
+    "$(has_all "$AGENTS/$a.md" 'build report of every round restates' 'for this head')"
+done
+check "plan skill: word it 'the build report states', not 'the PR states'" 1 \
+  "$(has_all "$SK" '"the build report states", never "the PR states"')"
+check "marshal: word it 'the build report states', not 'the PR states'" 1 \
+  "$(has_all "$MARSHAL" '"the build report states", never "the PR states"')"
+# The hand-off: the verifier has no backlog tools, so the report must reach it
+# as a file, and the three texts must name the same one.
+check "ship.md hands the verifier the newest build report as a file" 1 \
+  "$(has_all "$HERE/../commands/ship.md" '<state>/build-report.md' 'newest build report for that head')"
+check "driver.md hands the verifier the newest build report as a file" 1 \
+  "$(has_all "$AGENTS/driver.md" '<state>/build-report.md' 'newest build report for that head')"
+check "verifier: without a handed report the criterion is skipped, never not_met" 1 \
+  "$(has_all "$AGENTS/verifier.md" '<state>/build-report.md' 'none was handed to you' 'is `skipped`' 'never `not_met`')"
+# The 453 shape: the code at the new head is right, the PR body (written once,
+# never editable) quotes the old line, the round's build report quotes the new.
+# The replay reads WHICH file holds the stated fact out of verifier.md itself, so
+# a plugin that points the verifier at the PR body, or at nothing, goes red.
+F458="$STUB/f458"; mkdir -p "$F458"
+printf 'Nothing of Loopable is left in the old account.\n' > "$F458/at-head"
+printf 'Quotes l.96: "Nothing of Loopable is left in 326158158342."\n' > "$F458/pr-body"
+printf 'Quotes l.96: "Nothing of Loopable is left in the old account."\n' > "$F458/build-report.md"
+source_458() { # the file the shipped verifier.md says a stated fact is read from
+  tr '\n' ' ' < "$AGENTS/verifier.md" | tr -s ' ' | grep -o '<state>/[a-z-]*\.md' | head -1 | sed 's|.*/||'
+}
+verdict_458() {
+  local src q; src=$(source_458)
+  [ -s "$F458/$src" ] || { echo fail; return; }
+  q=$(sed -n 's/.*"\(.*\)".*/\1/p' "$F458/$src")
+  if grep -qxF -- "$q" "$F458/at-head"; then echo pass; else echo fail; fi
+}
+check "453 shape: the source verifier.md names holds the fact in the file, so pass" pass "$(verdict_458)"
 
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')

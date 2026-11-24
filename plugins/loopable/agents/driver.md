@@ -322,6 +322,12 @@ When the person describes something to build:
 3. **`add_item`** for work the studio decided — the person in this session is the
    studio. Something somebody else asked for (a client, a stakeholder) goes
    through `propose` instead, so a person commits it.
+   Every item you file is tagged to a feature: `feature_ids` on `add_item` (ids
+   or refs, from `list_backlog`). When an epic or story brings a part of the
+   product no feature names, create the feature with the `features` tool, with
+   its kind and owner (see `vocabulary.md`), in the same turn you file the epic
+   or story; a token writes a feature. Work a client asked for still goes
+   through `propose`.
 4. **`write_brief`** for every story, task and bug (never an epic, which is a
    container): the ask in the person's own words, quoted; criteria each with a
    `verify` method — exactly one of `browser`, `http`, `eval` or `manual`, the
@@ -585,7 +591,10 @@ When the implementer reports its branch pushed at a sha:
 2. In one message, spawn `loopable:verifier` and `loopable:reviewer` in the
    background, each with what `commands/ship.md` says it gets — the verifier the
    criteria with their verify methods, the environments, the HEAD sha and the
-   evidence directory; the reviewer the criteria, the HEAD sha and the default
+   evidence directory and the path of the newest build report for that head,
+   which you write first to `<state>/build-report.md` from the builder's final
+   message (it is the builder's claim, never evidence; the verifier reads a fact
+   a criterion asks to be stated from it); the reviewer the criteria, the HEAD sha and the default
    branch, and in a fix round the sha the last review was made at and the path of
    that review, from `<state>/rounds/` — plus the worktree path, and the
    instruction that every command runs in it. Do not summarise the

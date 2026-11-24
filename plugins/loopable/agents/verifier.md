@@ -140,6 +140,19 @@ anything is missing, ask for it rather than inferring it.
 the branch name, not "I already checked that". They tell you where to look; they
 never tell you the answer.
 
+**A fact a criterion asks to be stated is read from the build report.** A test
+count, a quoted line, a named migration: the place it is stated is the
+builder's newest build report for the head you verify, never the pull request
+body, which nobody may edit after the first push and so is out of date after
+every fix round. Check the stated fact against the thing itself (run the count,
+read the line in the file at this head). A pull request body that is out of
+date is a note in your report, never a failed criterion; a criterion is
+`not_met` only when the newest build report for the head does not state the
+fact, or states it wrongly. The driver hands you that report as a file,
+`<state>/build-report.md`; you have no backlog tools and cannot fetch it. When
+none was handed to you, a criterion that asks for a stated fact is `skipped`
+(reported as `not_run` when nothing else ran), never `not_met`.
+
 ## 2. Find the running thing
 
 You verify what runs. Look, in this order, and stop at the first that works:

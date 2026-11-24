@@ -254,6 +254,13 @@ report:
 Say plainly when you replaced the approach: every criterion then needs exercising
 again, not only the ones the newest round names.
 
+**The build report of every round restates what a criterion asks to be
+stated.** A test count, a quoted line, a named migration: put it in this
+round's report for this head, even when it was in the last one. The pull
+request body is written once, on the first push, and nobody may edit it after,
+so the report is the one place the fact stays current; the verifier reads it
+there.
+
 ## Further rounds
 
 The driver sends a further round as a new amendment in the brief file and a

@@ -223,6 +223,13 @@ report:
 - Anything out of scope you saw. Or "nothing".
 ```
 
+**The build report of every round restates what a criterion asks to be
+stated.** A test count, a quoted line, a named migration: put it in this
+round's report for this head, even when it was in the last one. The pull
+request body is written once, on the first push, and nobody may edit it after,
+so the report is the one place the fact stays current; the verifier reads it
+there.
+
 ## A fix round
 
 The driver appends the round's findings to the brief file and sends you their

@@ -16,8 +16,9 @@ sentence so a client can read it on its own.
 
 # The words we use
 
-Loopable has six words for the shape of work, seven for what the product owner
-proposes, escalates and remembers, and five for the machinery around it. They
+Loopable has six words for the shape of work, four for the kinds of feature,
+seven for what the product owner proposes, escalates and remembers, and five
+for the machinery around it. They
 are worth defining once because four readers use them at once — the product
 owner writing a backlog, a person reading a roadmap, a coding agent picking
 something up, and a client asking what is going on — and a word that means
@@ -43,8 +44,54 @@ is a feature that was written down as work.
 
 **Why.** A client asks "how is billing going?", not "how is item 41 going?".
 Features are what the question is about, and the answer is the work tagged
-with them. Only people write a feature; an agent proposes one and a person
-accepts it.
+with them. A studio caller writes a feature, a person or a token, and the record
+names both; the product owner and a client propose one, and a person accepts it.
+
+**Kinds.** Every feature is exactly one of four kinds — a surface, an agent, an
+automation or a service, defined next — and every feature has a named owner, a
+person who answers for it. The rule of thumb: ask what the feature is to
+someone using the product. If they look at it and touch it, it is a surface; if
+it holds a conversation or makes judgements from its own instructions and
+memory, it is an agent; if rules fire for them with nobody asking, it is an
+automation; if they never think of it until it stops, it is a service. When two
+fit, choose the one the owner would be paged for. A feature with no kind yet is
+read as a surface.
+
+## Surface
+
+A surface is a feature a person sees and uses: a page, a screen, a flow or a report.
+
+**When.** When a person can point at it on the screen and say "that one".
+
+**Not when.** Not when what they point at is only where an agent's answer or an
+automation's result is shown; the thing behind it is the feature.
+
+## Agent
+
+An agent is an AI in the product, defined by its instructions, its memory, its tools and the checks on what it says.
+
+**When.** When the feature answers or acts by judgement rather than by a fixed
+rule, and could be wrong in a way a person would want to review.
+
+**Not when.** Not for a fixed set of rules, which is an automation, and not for
+the coding agents who work on the product, who are members of it.
+
+## Automation
+
+An automation is a set of rules the product follows to decide or do something for someone without a person doing it.
+
+**When.** When it runs on a clock or a trigger and the same input gives the same
+result: a reminder, a digest, a rule that moves something along.
+
+**Not when.** Not when it needs judgement, which is an agent.
+
+## Service
+
+A service is a piece of infrastructure the product runs on, such as sign-in, the database or email.
+
+**When.** When other features depend on it and nobody uses it for its own sake.
+
+**Not when.** Not when a person uses it directly, which is a surface.
 
 ## Epic
 

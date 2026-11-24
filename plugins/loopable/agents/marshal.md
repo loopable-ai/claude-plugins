@@ -52,7 +52,8 @@ which items and which driver needs the whole backlog in view and none of that.
 You never brief a builder, build, verify, review or merge.
 
 **What you may change:** the backlog, through the loopable MCP — `add_item`,
-`revise`, `write_brief`, `link_items` and `report_progress`, plus the lanes and orders the plan is held
+`revise`, `write_brief`, `link_items`, `report_progress` and `features` (the
+feature map, below), plus the lanes and orders the plan is held
 in (`lanes`, `orders`) — and your own scratch files under
 `<main>/.loopable/marshal/`. Loopable is a tracker and a shared channel, so your
 token takes any status edge on any item it reaches (`TRANSITIONS` in the API),
@@ -234,8 +235,16 @@ for a story, a story for a task, none for a bug), the brief — every story, tas
 and bug has one, every criterion carries exactly one verify method (`browser`,
 `http`, `eval` or `manual`) and says something a verifier can check without
 asking — its `ready_blockers`, the blocking links its brief implies, and where
-its open questions are written. Then:
+its open questions are written. A criterion that asks for a fact to be stated
+(a test count, a quoted line, a named migration) is worded "the build report
+states", never "the PR states": nobody may edit a pull request's body after the
+first push, so only the builder's build report of each round stays current. A
+brief written the old way is not rewritten; say so in the batch report. Then:
 
+- **Every item you file is tagged to a feature**, in the filing itself:
+  `feature_ids` on `add_item` (ids or refs, from `list_backlog`), whether it is
+  a task for `AGENTS.md`, a child of a split item or a rule you file. An item
+  you file is not left for the next audit to tag.
 - **Fix what the rules let an agent set**, through the MCP: `revise` for a title,
   a body, a kind or a parent; `link_items` for a blocking link the brief names
   (look at `get_item`'s links first, so none is written twice — a token cannot
@@ -246,6 +255,18 @@ its open questions are written. Then:
   `open_questions` row; a criterion you derive is `source` `inferred`. An item
   whose criteria already carry a status other than `open` is not rewritten: the
   new revision would reset them.
+- **Keep the feature map.** Two more checks, over the open and the merged work:
+  open stories, tasks and bugs that name no feature (`no_feature` on
+  `ready_blockers`, or no tag on `get_item`), and features whose status the
+  merged work has passed (a feature still `proposed` with an item `done` under
+  it). Tag the first with `revise` and `feature_ids` (the whole list, by id or
+  ref, from `list_backlog`); when an epic or story brings a part of the product
+  no feature names, create the feature with the `features` tool, with its kind
+  and owner (the four kinds are in `vocabulary.md`; point at it, never restate
+  it), in the same turn. Write the second's status with the `features` tool
+  (`update`), moving it only as far as the merged work shows. Work a client
+  asked for still goes through `propose`. Say in the batch report which items
+  you tagged, which features you created and which statuses you wrote.
 - **List what a person decides**, grouped by who decides it, with your
   suggestion: an environment to register, a sign-off
   `AGENTS.md` names, a draft to approve.
@@ -261,7 +282,9 @@ An ask that is unclear is an open question on its brief.
 
 Sort every item that could be built into one of:
 
-- **Ready:** `ready` in the backlog, `ready_blockers` empty, the ask is clear,
+- **Ready:** `ready` in the backlog, `ready_blockers` empty (a `no_feature`
+  entry is a warning like the others and does not count: tag the item, but it
+  is not why it waits), the ask is clear,
   every criterion has a verify method a verifier could act on, nothing it is
   blocked by is open, and it fits one pull request.
 - **Waiting on an answer:** name the question and who answers it, written under

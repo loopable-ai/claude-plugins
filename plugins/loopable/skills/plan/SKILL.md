@@ -87,7 +87,10 @@ asking, against its brief:
 - **The criteria.** Each one carries a verify method (`browser`, `http`, `eval`
   or `manual`) and says something a verifier can check without asking what was
   meant. A criterion only a person can judge ("looks right", "feels fast") needs
-  its bar named.
+  its bar named. A criterion that asks for a fact to be stated (a test count, a
+  quoted line, a named migration) is worded "the build report states", never
+  "the PR states": the pull request body cannot be edited after the first push,
+  and the build report of every round restates the fact for its head.
 - **The inputs.** Copy, designs, data, accounts or credentials the work needs:
   reachable, or missing. `ready_blockers` names what readiness already counts.
 - **The decisions.** The standing decisions it must keep, and the choices the
@@ -165,6 +168,13 @@ independent of the person.
 ## 6. After approval: record it in the backlog
 
 Only now does anything get written, and only through the loopable MCP.
+
+**Every item you file is tagged to a feature** (`feature_ids` on `add_item`, or
+`revise` on one already filed). When an epic or story brings a part of the
+product no feature names, create the feature with the `features` tool, with its
+kind and owner (`vocabulary.md` defines the kinds; point at it), in the same
+turn the epic or story is filed. Work a client asked for still goes through
+`propose`.
 
 1. **Each item's brief, through `write_brief`.** Read it first with `get_item`:
    you are writing the next revision, and the write replaces EVERY field whole —

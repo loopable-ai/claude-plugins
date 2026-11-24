@@ -111,7 +111,9 @@ class Backlog:
         """api/lib/readiness.mjs readiness(), code for code and in its order:
         no brief written, no criterion with a verify method left unskipped, no
         registered environment where a browser or http criterion needs one.
-        `no_cast` is never written there yet (E4)."""
+        `no_cast` is never written there yet (E4). It then appends the warning
+        `no_feature` (473), as blockersNow shows it, for a story, task or bug
+        whose `feature_count` is 0 (an item that records no count says nothing)."""
         out = []
         if int(it.get('brief_rev') or 0) <= 0:
             out.append('no_brief')
@@ -122,6 +124,10 @@ class Backlog:
         if (any(c['verify'] in ('browser', 'http') for c in live)
                 and not any(e.get('kind') for e in self.s.get('environments', []))):
             out.append('no_environment')
+        # A warning (473), after the blockers, as readiness.mjs blockersNow shows it.
+        # Said only for an item that records its count, as lacksFeature does.
+        if it.get('kind') in ('story', 'task', 'bug') and it.get('feature_count') == 0:
+            out.append('no_feature')
         return out
 
     def ready_blockers(self, it, slim=True):

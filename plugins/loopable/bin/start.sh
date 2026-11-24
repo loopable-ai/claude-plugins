@@ -131,6 +131,8 @@ blocker_sentence() { # the same sentences as web/src/locales/en.json, for the sa
       printf 'No acceptance criterion says how it would be checked, so there is nothing to verify against.' ;;
     no_environment)
       printf 'A browser or http criterion needs an environment to run against, and none is registered for this project — register one.' ;;
+    no_feature)
+      printf 'It names no feature, so nobody can say which surface of the product it touches — tag at least one.' ;;
     no_cast)
       printf 'No cast has been compiled for this project yet, so nobody would run through it.' ;;
     # A code this plugin has not learned yet is still an answer, and printing it
