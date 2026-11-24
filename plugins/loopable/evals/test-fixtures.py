@@ -364,6 +364,71 @@ class TheStandIns(unittest.TestCase):
         finally:
             w.close()
 
+    def test_the_backlog_has_a_features_tool_and_revise_tags_an_item(self):
+        """473 and 474: the marshal's audit tags untagged items (revise with
+        feature_ids) and writes a feature's status (the features tool). The
+        stand-in takes both, as the API does, and no model is called."""
+        w = Walk('after-merge')
+        try:
+            p = w.fx['project']
+            me = w.json('.loopable-eval/backlog.json')['me']['member_id']
+            w.tool('add_item', {'project_id': p, 'title': 'untagged', 'kind': 'task'})
+            ref = str(w.tool('list_backlog', {'project_id': p, 'status': 'todo'})['items'][-1]['ref'])
+            # Tag an untagged item: its tags and its count change, and no_feature goes.
+            # add_item records no feature_count, and the API's items do (0 for an
+            # untagged one): set the count by hand so no_feature is judged.
+            state = w.ws / '.loopable-eval/backlog.json'
+            s = json.loads(state.read_text())
+            next(i for i in s['items'].values() if str(i['ref']) == ref)['feature_count'] = 0
+            state.write_text(json.dumps(s))
+            self.assertIn('no_feature', w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']['item']['ready_blockers'])
+            made = w.tool('features', {'project_id': p, 'action': 'create',
+                                       'fields': {'title': 'Checkout', 'kind': 'service', 'owner_id': me}})['feature']
+            self.assertEqual((made['status'], made['kind'], made['owner_id']), ('proposed', 'service', me))
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'feature_ids': [made['ref']]})
+            got = w.tool('get_item', {'project_id': p, 'item_id': ref})['item']
+            self.assertEqual(got['feature_ids'], [made['id']])
+            self.assertNotIn('no_feature', got['ready_blockers'] or [])
+            listed = w.tool('list_backlog', {'project_id': p})
+            self.assertEqual(listed['tags'][-1], {'work_item_id': got['id'], 'feature_id': made['id']})
+            self.assertEqual([f['id'] for f in listed['features']], [made['id']])
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'feature_ids': []})
+            self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['feature_ids'], [])
+            self.assertIn('no_feature', w.tool('pull_item', {'project_id': p, 'item_id': ref})['pack']['item']['ready_blockers'])
+            # Move a feature's status, kind and owner; the API's refusals stand.
+            w.tool('features', {'project_id': p, 'action': 'update', 'feature_id': made['ref'],
+                                'fields': {'status': 'building', 'kind': 'agent'}})
+            row = w.tool('list_backlog', {'project_id': p})['features'][0]
+            self.assertEqual((row['status'], row['kind']), ('building', 'agent'))
+            for fields in ({'status': 'nope'}, {'kind': 'nope'}, {'status': 'superseded'}, {'owner_id': 'm-nobody'}):
+                w.tool('features', {'project_id': p, 'action': 'update', 'feature_id': made['id'], 'fields': fields}, ok=False)
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'feature_ids': ['f999']}, ok=False)
+            w.tool('revise', {'project_id': p, 'item_id': ref}, ok=False)
+            # The ref is the bare number, as the API renders it, and f7 reads too.
+            self.assertEqual(str(made['ref']), str(made['ref']).lstrip('f'))
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'feature_ids': [str(made['ref'])]})
+            self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['feature_ids'], [made['id']])
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'feature_ids': ['f' + str(made['ref'])]})
+            w.tool('features', {'project_id': p, 'action': 'update', 'feature_id': str(made['ref']),
+                                'fields': {'status': 'live'}})
+            # A refused create writes nothing: no feature, no ref spent.
+            before = w.json('.loopable-eval/backlog.json')
+            for fields in ({'title': 'A', 'kind': 'nope'}, {'title': 'B', 'owner_id': 'm-x'},
+                           {'title': 'C', 'status': 'superseded'}, {'title': ' '}):
+                w.tool('features', {'project_id': p, 'action': 'create', 'fields': fields}, ok=False)
+            after = w.json('.loopable-eval/backlog.json')
+            self.assertEqual(after['features'], before['features'])
+            self.assertEqual(after['next_ref'], before['next_ref'])
+            # A refused update changes nothing either, and a refused revise keeps the old words.
+            w.tool('features', {'project_id': p, 'action': 'update', 'feature_id': made['id'],
+                                'fields': {'title': 'Renamed', 'kind': 'nope'}}, ok=False)
+            self.assertEqual(w.json('.loopable-eval/backlog.json')['features'], before['features'])
+            title = w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['title']
+            w.tool('revise', {'project_id': p, 'item_id': ref, 'title': 'New words', 'feature_ids': ['f999']}, ok=False)
+            self.assertEqual(w.tool('get_item', {'project_id': p, 'item_id': ref})['item']['title'], title)
+        finally:
+            w.close()
+
     def test_get_item_answers_with_the_apis_six_top_level_keys(self):
         """The API's get_item gives item, brief, children, links, trail and graph:
         lists and an object. The fake gives the same keys, no more, in those types."""

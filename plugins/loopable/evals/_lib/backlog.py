@@ -45,6 +45,9 @@ STATUSES = ['todo', 'ready', 'in_progress', 'in_review', 'verifying', 'done',
 VERIFY = ('browser', 'http', 'eval', 'manual')
 KINDS = ('epic', 'story', 'task', 'bug')
 ENDINGS = ('met', 'skipped', 'after_merge')
+# api/lib/features.mjs: LIFECYCLE and KINDS, the words a feature's status and kind take.
+FEATURE_STATUSES = ('proposed', 'building', 'live', 'retired', 'superseded')
+FEATURE_KINDS = ('surface', 'agent', 'automation', 'service')
 
 
 class Refused(Exception):
@@ -86,6 +89,32 @@ class Backlog:
         if ref in self.s['items']:
             return self.s['items'][ref]
         raise Refused(404, 'No item ' + ref + ' in this project.')
+
+    def feature(self, ref):
+        """A feature by id or by its ref, 7 or f7 (the ref is the number, as the
+        API renders it; the counter is the items')."""
+        ref = str(ref or '').strip().lower().split('/')[-1]
+        for f in self.s.setdefault('features', []):
+            if ref == f['id'] or ref.lstrip('f') == str(f['ref']):
+                return f
+        raise Refused(404, 'No feature ' + ref + ' in this project.')
+
+    def owner(self, owner_id):
+        """A studio member, by id: the token's own member is the one the stand-in knows."""
+        if owner_id is None:
+            return None
+        if owner_id != self.s['me'].get('member_id'):
+            raise Refused(400, 'The owner must be a member of this studio.')
+        return owner_id
+
+    def tag(self, it, feature_ids):
+        """ids (already resolved) REPLACE the item's tags; the count follows."""
+        ids = list(feature_ids)
+        tags = [t for t in self.s.setdefault('tags', []) if t['work_item_id'] != it['id']]
+        for fid in dict.fromkeys(ids):
+            tags.append({'work_item_id': it['id'], 'feature_id': fid})
+        self.s['tags'] = tags
+        it['feature_count'] = len(set(ids))
 
     def session(self, sid):
         s = self.s['sessions'].get(str(sid or ''))
@@ -158,6 +187,8 @@ class Backlog:
 
     def full(self, it):
         return {'item': {**self.summary(it), 'ask': it.get('ask'), 'body': it.get('body'),
+                         'feature_ids': [t['feature_id'] for t in self.s.get('tags', [])
+                                         if t['work_item_id'] == it['id']],
                          'ready_blockers': self.ready_blockers(it)},
                 'brief': {'brief_rev': it.get('brief_rev', 0), 'ask': it.get('ask'),
                           'criteria': self.criteria(it),
@@ -185,6 +216,67 @@ class Backlog:
         it['status'] = status
         it['status_note'] = note
         it.setdefault('trail', []).append({'to': status, 'note': note, 'via': via})
+
+    def write_feature(self, a, feature=None):
+        """features create and update, api/lib/features.mjs: title required at
+        birth, kind one of four (surface by default), status one of five, an owner
+        who is a member, and superseded only BY a successor."""
+        fields = a.get('fields')
+        if not isinstance(fields, dict):
+            raise Refused(400, 'features: give fields.')
+        # Every check runs on a copy, and the state changes only once all hold:
+        # the API's write is one statement and a refusal leaves nothing behind.
+        creating = feature is None
+        if creating:
+            title = str(fields.get('title') or '').strip()
+            if not title:
+                raise Refused(400, 'title is required')
+            ref = self.s['next_ref'] + 1
+            row = {'id': str(uuid.UUID(int=(0xfea7 << 112) + ref)), 'ref': ref,
+                   'project_id': self.s['project']['id'], 'title': title, 'body': '',
+                   'status': 'proposed', 'superseded_by': None, 'internal': False,
+                   'kind': 'surface', 'owner_id': None, 'owner_name': None}
+        else:
+            row = dict(feature)
+        kind = fields.get('kind', row['kind'])
+        if kind not in FEATURE_KINDS:
+            raise Refused(400, 'kind must be one of ' + ', '.join(FEATURE_KINDS) + '.')
+        row['kind'] = kind
+        if 'status' in fields:
+            status = fields['status']
+            if status not in FEATURE_STATUSES:
+                raise Refused(400, 'status must be one of ' + ', '.join(FEATURE_STATUSES) + '.')
+            successor = fields.get('superseded_by')
+            if status == 'superseded':
+                if not successor:
+                    raise Refused(400, 'superseded means BY something - send superseded_by with the successor')
+                successor = self.feature(successor)['id']
+                if successor == row['id']:
+                    raise Refused(400, 'a feature cannot supersede itself')
+            row['status'] = status
+            row['superseded_by'] = successor if status == 'superseded' else None
+        elif 'superseded_by' in fields:
+            raise Refused(400, 'superseding is a status change - send status superseded with the successor')
+        if 'owner_id' in fields:
+            row['owner_id'] = self.owner(fields['owner_id'])
+            row['owner_name'] = (self.s['me'].get('name') if row['owner_id'] else None)
+        for k in ('title', 'body'):
+            if k not in fields:
+                continue
+            value = str(fields[k] or '')
+            if k == 'title':
+                value = value.strip()
+                if not value:
+                    raise Refused(400, 'title is required')
+            row[k] = value
+        if 'internal' in fields:
+            row['internal'] = bool(fields['internal'])
+        if creating:
+            self.s['next_ref'] = ref
+            self.s.setdefault('features', []).append(row)
+            return row
+        feature.update(row)
+        return feature
 
     def add_item(self, a, via):
         title = (a.get('title') or '').strip()
@@ -218,13 +310,16 @@ def flat(op, via, a, result=None, error=None):
     """One line a regex can read: the op, whether it held, and the fields that say what it did."""
     line = {'op': op, 'via': via, 'ok': error is None}
     for k in ('item_id', 'session_id', 'status', 'kind', 'title', 'state', 'verdict', 'head_sha',
-              'blocker_id', 'blocked_id', 'parent_id', 'branch', 'pr_url', 'note'):
+              'blocker_id', 'blocked_id', 'parent_id', 'branch', 'pr_url', 'note',
+              'action', 'feature_id', 'feature_ids'):
         if k in a and a[k] is not None:
             line[k] = a[k]
     ref = a.get('ref')
     if isinstance(ref, dict):
         line['event'] = ref.get('event')
         line['fields'] = ref
+    if op == 'features' and isinstance(a.get('fields'), dict):
+        line['feature_fields'] = a['fields']
     if op == 'close_session' and isinstance(a.get('criteria'), list):
         line['criteria'] = [c.get('status') for c in a['criteria'] if isinstance(c, dict)]
     if op in ('post_activity', 'add_item', 'propose') and a.get('body'):
@@ -254,7 +349,17 @@ def tool(b, name, a, via='tool'):
         if a.get('titles_only'):
             items = [{'id': i['id'], 'ref': i['ref'], 'title': i['title'], 'status': i['status'],
                       'kind': i['kind']} for i in items]
-        return {'items': items}, None
+        # The API's flat read carries the product plane beside the items, under
+        # these key names: the features and the tags joining work to them.
+        return {'items': items, 'features': list(b.s.get('features', [])),
+                'tags': list(b.s.get('tags', []))}, None
+    if name == 'features':
+        action = a.get('action')
+        if action == 'create':
+            return {'feature': b.write_feature(a)}, None
+        if action == 'update':
+            return {'feature': b.write_feature(a, b.feature(a.get('feature_id')))}, None
+        raise Refused(400, 'features: action is create or update.')
     if name == 'get_item':
         return b.full(b.item(a.get('item_id'))), None
     if name == 'pull_item':
@@ -283,9 +388,19 @@ def tool(b, name, a, via='tool'):
         return {'draft': {'id': b.new_id(), 'status': 'pending'}}, None
     if name == 'revise':
         it = b.item(a.get('item_id'))
+        if a.get('title') is None and a.get('body') is None and a.get('feature_ids') is None:
+            raise Refused(400, 'revise: give a title, a body, feature_ids, or several')
+        # The tags resolve first: a refused id leaves the words as they were.
+        ids = None
+        if a.get('feature_ids') is not None:
+            if not isinstance(a['feature_ids'], list):
+                raise Refused(400, 'feature_ids must be a list.')
+            ids = [b.feature(f)['id'] for f in a['feature_ids']]
         for k in ('title', 'body'):
             if a.get(k) is not None:
                 it[k] = a[k]
+        if ids is not None:
+            b.tag(it, ids)
         return {'item': b.summary(it)}, {'ref': it['ref']}
     if name == 'link_items':
         blocker, blocked = b.item(a.get('blocker_id')), b.item(a.get('blocked_id'))

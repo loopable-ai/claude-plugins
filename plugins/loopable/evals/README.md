@@ -47,6 +47,10 @@ directory `claude plugin eval` makes for the run. It builds:
   line in `backlog-events.jsonl`. Its edge table still models the rule from
   before 410, which kept a token off some edges; the API now lets every studio
   token take any edge, and bringing the stand-in up to date is its own item.
+  It also carries the product plane the marshal's audit reads and writes: a
+  `features` tool (create and update, with status, kind and owner), `revise`
+  applying `feature_ids` (the item's tags and feature count follow), and
+  `list_backlog` returning `features` and `tags` under the API's key names.
 - **The plugin under test**, copied in unmodified: `agents/driver.md` as
   `.loopable-eval/role.md`, and `bin/`, `hooks/`, `skills/` under
   `.loopable-eval/plugin/`. The case's prompt has the main session read the role
