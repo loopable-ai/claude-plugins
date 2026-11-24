@@ -488,16 +488,60 @@ another agent may take it. $AGAIN"
 # console and the stall detector want a harness at work on a branch. It opens
 # rather than resumes because the item was `$STATUS` a moment ago: nobody had
 # claimed it, so nobody should hold a session on it — a reused worktree is a
-# start that never got this far. If one is open anyway the API refuses the open,
-# this says the session could not be opened, and the SessionStart hook in that
-# worktree resumes the open one by the API's own answer.
+# start that never got this far. If one is open anyway the API refuses the open
+# with a 409 that names it (482): on THIS branch it is this work's own, left by
+# an earlier attempt, and is resumed here; on another branch this says whose it
+# is and the SessionStart hook in that worktree decides what to join.
 REPO_NAME=$(git -C "$REPO" remote get-url origin 2>/dev/null |
   sed -E 's|^.*[:/]([^/:]+/[^/]+?)(\.git)?$|\1|') || REPO_NAME=""
 [ -n "$REPO_NAME" ] || REPO_NAME=$(basename "$REPO")
-SESSION=$(loopable_post "/agent/projects/$PROJECT/sessions" \
+SESSION=""; HELD_BY=""; HELD_ON=""; REFUSED=""; RESUMED=""
+if REPLY=$(loopable_post_reply "/agent/projects/$PROJECT/sessions" \
   "$(jq -nc --arg i "$ITEM_ID" --arg h claude-code --arg r "$REPO_NAME" --arg b "$BRANCH" \
-     '{item_id: $i, harness: $h, repo: $r, branch: $b}')" |
-  jq -r '.session.id // empty' 2>/dev/null) || SESSION=""
+     '{item_id: $i, harness: $h, repo: $r, branch: $b}')"); then
+  CODE=$(printf '%s\n' "$REPLY" | tail -1)
+  ANSWER=$(printf '%s\n' "$REPLY" | sed '$d')
+  case "$CODE" in
+    2*) SESSION=$(printf '%s' "$ANSWER" | jq -r '.session.id // empty' 2>/dev/null) || SESSION="" ;;
+    409)
+      # THE BACKLOG DID ANSWER (482): a session is already open on this item,
+      # and the answer names it in fields. Read the id from there; when it
+      # carries none, ask for the item's open session. On THIS branch it is
+      # this work's own session, left open by an earlier attempt: resume it.
+      # On another, say whose it is and never claim silence.
+      OPEN_ID=$(printf '%s' "$ANSWER" | jq -r '.session.id // empty' 2>/dev/null) || OPEN_ID=""
+      HELD_ON=$(printf '%s' "$ANSWER" | jq -r '.session.branch // empty' 2>/dev/null) || HELD_ON=""
+      HELD_BY=$(printf '%s' "$ANSWER" | jq -r '.session.member_name // empty' 2>/dev/null) || HELD_BY=""
+      if [ -z "$OPEN_ID" ]; then
+        ROW=$(loopable_sessions "$PROJECT" "$ITEM_ID" 2>/dev/null |
+          awk -F'\t' '$2 == "pending" || $2 == "active" || $2 == "awaiting_input" {print; exit}') || ROW=""
+        if [ -n "$ROW" ]; then
+          OPEN_ID=$(printf '%s' "$ROW" | cut -f1)
+          HELD_ON=$(printf '%s' "$ROW" | cut -f6)
+        fi
+      fi
+      if [ -z "$OPEN_ID" ]; then
+        # The API's own 409 with no session: one was open a moment ago and
+        # closed since. Nobody holds it now.
+        REFUSED=closed
+      elif [ "$HELD_ON" = "$BRANCH" ]; then
+        SESSION=$OPEN_ID
+        RESUMED=1
+      else
+        REFUSED=409
+      fi ;;
+    *) REFUSED=$CODE ;;
+  esac
+  # THE ID BECOMES A FILE the next run puts in a path (ship.sh's rule): an id,
+  # or nothing.
+  if [ -n "$SESSION" ] && ! [[ $SESSION =~ ^[A-Za-z0-9-]+$ ]]; then
+    SESSION=""; RESUMED=""; REFUSED=badid
+  fi
+fi
+if [ -n "$RESUMED" ]; then
+  say "A session was already open on this item, on this branch — resumed it ($SESSION)."
+  say
+fi
 if [ -n "$SESSION" ]; then
   # WRITTEN INTO THE NEW WORKTREE, not this one. The next session that starts
   # there finds the item and the session already resolved, and session-start.sh
@@ -521,8 +565,23 @@ else
   # NOT FATAL, and the one place that is true: the worktree is made and the
   # item is claimed, so the work can proceed. The session opens by itself the
   # moment a session starts in the new worktree.
-  say "The session could not be opened — the backlog did not answer. The worktree and the"
-  say "progress report stand; a session will open when a Claude Code session starts there."
+  if [ "$REFUSED" = 409 ]; then
+    WHO=$(loopable_safe "${HELD_BY:-somebody}"); ON=$(loopable_safe "$HELD_ON")
+    say "The session could not be opened — one is already open on this item, held by ${WHO}${ON:+ on $ON}."
+    say "Resume it rather than opening a second. The worktree and the progress report stand."
+  elif [ "$REFUSED" = closed ]; then
+    say "The session could not be opened — one was open on this item and closed meanwhile."
+    say "Run this again to open a new one. The worktree and the progress report stand."
+  elif [ "$REFUSED" = badid ]; then
+    say "The session could not be recorded — the backlog named a session id that is not an id."
+    say "The worktree and the progress report stand; a session will open when a Claude Code session starts there."
+  elif [ -n "$REFUSED" ]; then
+    say "The session could not be opened — the backlog refused it (HTTP $REFUSED). The worktree and the"
+    say "progress report stand; a session will open when a Claude Code session starts there."
+  else
+    say "The session could not be opened — the backlog did not answer. The worktree and the"
+    say "progress report stand; a session will open when a Claude Code session starts there."
+  fi
   say
 fi
 

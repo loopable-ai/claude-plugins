@@ -206,6 +206,7 @@ case "$U" in
   # session list, which the merge guard reads to find the item of a PR that
   # names none (363).
   */sessions)
+    [ "$M" = POST ] && [ -n "${STUB_SESSION_POST_FAIL:-}" ] && exit 22
     [ "$M" = GET ] && answer "$(cat "${STUB_SESSIONS:-/dev/null}")"
     [ -s "${STUB_OPEN_ERR:-/dev/null}" ] && answer "$(cat "$STUB_OPEN_ERR")" "${STUB_OPEN_CODE:-409}"
     answer '{"session":{"id":"s-new"}}' 201 ;;
@@ -2066,6 +2067,71 @@ check "the item is reported in_progress" 1 \
 check "the session is opened"          1 "$(sent POST '/sessions$')"
 check "and written into that worktree" s-new "$(cat "$NDIR/session" 2>/dev/null)"
 check "which is the one it points at"  1 "$(printf '%s\n' "$OUT" | grep -cF "Open a new session in $WT")"
+
+# THE OPEN IS REFUSED BECAUSE ONE IS OPEN (482). The backlog answered 409 and
+# named the session; "the backlog did not answer" was false and no session file
+# was written. On this item's branch the session is resumed and written; on
+# another branch the holder is named; the sentence about silence is for silence.
+rm -f "$NDIR/item" "$NDIR/session"
+jq -nc --arg b "$BRANCH_READY" '{session:{id:"s-left",branch:$b,member_name:"Ada"},message:"a session is already open"}' > "$STUB_OPEN_ERR"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "409, the open session on this branch — exits 0"  0 "$RC"
+check "its id is written into the worktree"            s-left "$(cat "$NDIR/session" 2>/dev/null)"
+check "and the output says it resumed it"              1 "$(printf '%s\n' "$OUT" | grep -c 'resumed it (s-left)')"
+check "and prints it in the pack"                      1 "$(printf '%s\n' "$OUT" | grep -c 'session   s-left')"
+check "never claiming silence"                         0 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
+
+# The answer carries no id: the item's own open session is read instead.
+rm -f "$NDIR/item" "$NDIR/session"
+printf '{"message":"a session is already open"}' > "$STUB_OPEN_ERR"
+sessions_are "[{id:\"s-listed\",state:\"active\",item_id:\"$READY\",branch:\"$BRANCH_READY\"}]"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "409 with no id, read from the item's sessions"  s-listed "$(cat "$NDIR/session" 2>/dev/null)"
+check "  and says it resumed it"                       1 "$(printf '%s\n' "$OUT" | grep -c 'resumed it (s-listed)')"
+
+# Somebody else's, on another branch: named, nothing written, no false claim.
+rm -f "$NDIR/item" "$NDIR/session"
+jq -nc '{session:{id:"s-theirs",branch:"feat/other-branch-9",member_name:"Grace"}}' > "$STUB_OPEN_ERR"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "409, a session on another branch — exits 0"     0 "$RC"
+check "names who holds it"                             1 "$(printf '%s\n' "$OUT" | grep -c 'held by Grace on feat/other-branch-9')"
+check "never claiming silence, either"                 0 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
+check "and writes no session file"                     0 "$([ -s "$NDIR/session" ] && echo 1 || echo 0)"
+check "the start still stands (session none)"          1 "$(printf '%s\n' "$OUT" | grep -c 'session   none')"
+
+# A 409 that names no session and finds none listed: it closed meanwhile.
+rm -f "$NDIR/item" "$NDIR/session"
+printf '{"message":"a session was open a moment ago"}' > "$STUB_OPEN_ERR"
+sessions_are '[]'
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "409, nothing open now — says it closed meanwhile" 1 "$(printf '%s\n' "$OUT" | grep -c 'closed meanwhile')"
+check "  and does not say somebody holds it"           0 "$(printf '%s\n' "$OUT" | grep -c 'held by')"
+# A pending session is found by the list too.
+sessions_are "[{id:\"s-pend\",state:\"pending\",item_id:\"$READY\",branch:\"$BRANCH_READY\"}]"
+run_start "$READY" >/dev/null
+check "409, a pending session listed — resumed"      s-pend "$(cat "$NDIR/session" 2>/dev/null)"
+# An id that is not an id is never written.
+rm -f "$NDIR/item" "$NDIR/session"
+jq -nc --arg b "$BRANCH_READY" '{session:{id:"s-x/../../y",branch:$b}}' > "$STUB_OPEN_ERR"
+run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "409 naming a bad id — never written"          0 "$([ -s "$NDIR/session" ] && echo 1 || echo 0)"
+check "  and says so"                                1 "$(printf '%s\n' "$OUT" | grep -c 'not an id')"
+
+# A refusal that is not a 409 is a refusal, not silence.
+rm -f "$NDIR/item" "$NDIR/session"
+printf '{"message":"boom"}' > "$STUB_OPEN_ERR"
+STUB_OPEN_CODE=500 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a 500 on the open — exits 0"                  0 "$RC"
+check "  says it refused it (HTTP 500)"              1 "$(printf '%s\n' "$OUT" | grep -c 'refused it (HTTP 500)')"
+check "  and does not say it did not answer"         0 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
+# Silence at the session step only: the pack and the claim answered.
+: > "$STUB_OPEN_ERR"
+STUB_SESSION_POST_FAIL=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "the open itself unanswered — exits 0"         0 "$RC"
+check "  says the backlog did not answer"            1 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
+check "  and not that it refused"                    0 "$(printf '%s\n' "$OUT" | grep -c 'refused it')"
+: > "$STUB_OPEN_ERR"
+sessions_are '[]'
 
 # A BRANCH WITH NO WORKTREE ON IT is still refused: there is nothing to reuse,
 # and putting a checkout on a branch somebody left is that somebody's call.
