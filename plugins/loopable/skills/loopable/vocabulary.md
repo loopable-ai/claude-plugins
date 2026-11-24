@@ -47,8 +47,8 @@ with them. A studio caller writes a feature, a person or a token, and the record
 names both; the product owner and a client propose one, and a person accepts it.
 
 **Kinds.** Every feature is exactly one of four kinds — a surface, an agent, an
-automation or a service, defined below — and every feature has a named owner, a
-person who answers for it. The rule of thumb: ask what the feature is to
+automation or a service, each with its own definition — and every feature has a named owner, a
+person who answers for it. To tell them apart, ask what the feature is to
 someone using the product. If they look at it and touch it, it is a surface; if
 it holds a conversation or makes judgements from its own instructions and
 memory, it is an agent; if rules fire for them with nobody asking, it is an
