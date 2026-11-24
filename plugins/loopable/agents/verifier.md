@@ -65,7 +65,7 @@ will not.
 Every hand-off on the team is a Loopable message of its type (`assign`,
 `amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
 `brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
-`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+`merged`, `lane_ended`, `file_request`, `notice`), read from `messages` in the `loopable` MCP and sent
 with it, naming the item, the lane, the round and the head it refers to, the
 structured part of a report in `fields` and the rest in `text`. A person reads
 what every agent said and where every item stands from there and does not type

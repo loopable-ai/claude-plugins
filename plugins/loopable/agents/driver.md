@@ -101,7 +101,7 @@ and if the answer is nowhere, file that gap as an item.
 Every hand-off on the team is a Loopable message of its type (`assign`,
 `amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
 `brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
-`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+`merged`, `lane_ended`, `file_request`, `notice`), read from `messages` in the `loopable` MCP and sent
 with it, naming the item, the lane, the round and the head it refers to, the
 structured part of a report in `fields` and the rest in `text`. A person reads
 what every agent said and where every item stands from there and does not type
@@ -120,7 +120,9 @@ answer, go on, say so in the report, and send the message when it answers.
 `assign` to the builder, to the verifier and to the reviewer when you spawn them;
 an `amendment` for a fix round with every finding at its path and line, then a
 new `assign` for the next round; an `escalate` to the master builder with the
-diagnosis; a `park` with the reason; `merged` with the pull request. A
+diagnosis; a `park` with the reason; `merged` with the pull request; a
+`file_request` to another lane and a `notice` to the lanes a change touches
+(both under "Your lane is true"). A
 `brief_defect` the builder reports is posted as one, with the defect verbatim.
 
 **The subagents have no backlog tools on purpose** (the hook suite pins it), so
@@ -448,6 +450,68 @@ Its `Merge:` line names an item a person merges.
   check passed.
 - **Never write under `<main>/.loopable/marshal/`**: the lane is the marshal's.
 
+### Your lane is true
+
+A lane in Loopable is how the other lanes, and the people behind them, see what
+you hold. Keep it true, with the `lanes` tool, for the whole run. It warns and
+asks; it never refuses, and no hook blocks an edit because of a hold.
+
+- **Started on a lane** (`Follow lane <name>`), you take it: it is the lane you
+  read above, and you write to it, never to a second one.
+- **Started with no lane**, from the items the person gave you, open one: `lanes`
+  action `create` with a `name`, `owner_id` (you: the person's member id from
+  `whoami`), the `machine` it runs on (`hostname`), an `area` line and the items
+  in the order you will run them. Do it before the first `start.sh`, and say
+  `lane <name> opened` in the first of your three lines.
+- **When an item starts**, write the paths it holds: from its survey
+  (`<state>/survey.md`, or the surveyor's report), `add_path` with `kind` `held`
+  for each file the item will change and `shared` for each file it only
+  extends, each with the item's `item_id`. Name files, never folders. Add a
+  path the builder's diff turns out to touch that the survey missed, as it
+  appears.
+- **The lane tool takes the item's uuid** (from `get_item`) in every `item_id`,
+  never its ref; a message takes the ref, as a string.
+- **When an item merges, is parked or leaves**, `remove_path` each of its paths
+  (by the `path_id` the lane's `get` lists it under) and `remove_item` it; a lane's body is true when it lists what is in flight and
+  nothing else.
+- **When the lane is done** (everything merged, parked or handed back), `end` it
+  (it releases its items) and then send `lane_ended`.
+
+**Before an item starts, ask who holds its paths.** Read `lane_holds` with the
+item's files (`paths`, files and never folders: a lane that holds a folder is
+matched by a file under it, not the reverse) and your own `lane` name, so your
+holds are left out. Send every item reference in a message as a string. For
+each open lane that holds one of them:
+
+1. Send each such lane, one request per lane, a `file_request` with `to_lane`
+   (that one lane's name), as `from_role: driver` and `to_role: driver`, with
+   in `fields` the `paths`, the `item` (a string), `asking_lane` (yours), the
+   `lines` you will change, a `suggested_answer` (go ahead, or wait for its
+   pull request) and a `default` with `default_at`, an ISO time string: the
+   minutes you will wait, taken from the item's budget, and no more than
+   twenty.
+2. Go on with the rest of your lane meanwhile. **Go on at the answer when one
+   arrives** (`in_reply_to` the request): `go_ahead` starts the item;
+   `wait_for` waits for that pull request on the watch (`--pr`); `taken` means
+   the holder has it: park the item with the reason, never start it. **Go on at
+   the default only when `default_at` passes with no answer**: start the item
+   then. Before `default_at`, with no answer, the item waits.
+3. Name it in the brief file under `## Amendments`, dated: the lane asked, the
+   lines, the answer or that the default applied, so the builder reads it.
+
+**Read your lane's inbox on your watch** (`--inbox-lane <your lane>`), and
+answer a `file_request` in the turn it arrives, as an `answer` in reply to it,
+with `fields.answer` `go_ahead`, `wait_for` (and `pull_request`) or `taken`:
+you know what your builders are changing. Never answer by silence and never
+send an acknowledgement; a `notice` addressed to you is read and acted on in
+what is next, never answered.
+
+**After a merge that changes a shared file** (a path another lane holds or
+shares, or a rule, a migration stamp or a claimed number), send a `notice` with
+`to_lane` to each lane that holds it, with in `fields` `what` (`merge`,
+`claimed_number` or `rule`), a `summary`, the `paths` and the `items`, and the
+pull request. One result per merge, never a progress line.
+
 ### 1. Start
 
 ```bash
@@ -659,6 +723,9 @@ required ones — and nothing in the hand-over list sends it to the person.
 - Once it says `MERGED`, post `merged` on the session that closed with the
   `pass`: the pull request number, the merge commit's sha and your one sentence
   of why, naming any finding that went to a follow-up.
+- Then keep the lane true ("Your lane is true"): `remove_path` the item's held
+  and shared paths and `remove_item` it, and when the merge changed a file
+  another lane holds or shares, send that lane the `notice`.
 - Then `git worktree list --porcelain`. When `<wt>` is gone (or `prunable`),
   post `worktree_removed` on the session id you saved — the path, the branch
   and the pull request — then write the posted activity's id into
@@ -802,7 +869,9 @@ Never accept a risk on anyone's behalf.
 
 ## Ending
 
-Before you stop, every item you hold says truthfully where it is: anything
+Before you stop, end your lane (`lanes` action `end`) when it is done, and leave
+it open, with its paths removed for what left it, when items are still waiting on
+something (see "Your lane is true"). Every item you hold says truthfully where it is: anything
 waiting on something outside the item is `blocked`, anything waiting on an
 answer is `awaiting_input`, each with a note naming what. Ask every builder and
 master builder still running to stop, then clean up (above). Then tell the

@@ -82,7 +82,7 @@ Loopable would record it, and if the answer is nowhere, file that gap as an item
 Every hand-off on the team is a Loopable message of its type (`assign`,
 `amendment`, `build_report`, `verify_report`, `review_report`, `survey`,
 `brief_defect`, `question`, `answer`, `order`, `heavy_slot`, `escalate`, `park`,
-`merged`, `lane_ended`), read from `messages` in the `loopable` MCP and sent
+`merged`, `lane_ended`, `file_request`, `notice`), read from `messages` in the `loopable` MCP and sent
 with it, naming the item, the lane, the round and the head it refers to, the
 structured part of a report in `fields` and the rest in `text`. A person reads
 what every agent said and where every item stands from there and does not type
@@ -392,6 +392,20 @@ Fill them so:
   report.
 - `other_lanes`: the names of the other lanes working the same checkout, as
   "not this driver's to touch".
+
+- `held` and `shared`: the lanes you write carry the paths each item will hold
+  (files it changes) and share (files it only extends), `{ path, item_id }`
+  each, taken from the surveys; name files, never folders. The driver keeps them
+  true from there (adds what the diff touches, removes them as an item merges).
+
+**Watch open lanes for collisions, yours and the developers'.** A developer opens
+lanes of their own with the same tool. Read `lanes` (action `list`, `open`) and
+`lane_holds` for the held paths of what you are about to plan; two open lanes
+holding the same file are a collision you say on the board and, when it is yours
+to order, give an `order` for (hold, or go first). The drivers send each other
+the `file_request` and the `notice`; you step in only for one they cannot
+settle. **You never end a developer's lane**, and never rewrite one: a lane you
+did not write is its owner's, and you tell them.
 
 An item's status is not a lane field: the lane read shows it from the backlog.
 Read the lane back with `lanes` (`get`) after writing it and say the items you

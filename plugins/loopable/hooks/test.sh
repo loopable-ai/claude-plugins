@@ -4025,6 +4025,122 @@ check "SKILL.md tool table has a features row" 1 \
 check "SKILL.md does not send a new feature to propose" 0 \
   "$(grep -ci 'propose.*kind feature\|kind feature.*propose' "$SKILLM")"
 
+# 479: the driver keeps its lane true and asks before it changes a file another
+# lane holds; the marshal watches open lanes. The texts are pinned phrase by
+# phrase, then two lanes whose items share one file are replayed.
+echo
+echo " the driver's lane, held paths and file requests (479):"
+DRV="$AGENTS/driver.md"
+for a in driver marshal builder masterbuilder reviewer surveyor verifier; do
+  check "$a.md lists file_request and notice in the protocol" 1 \
+    "$(has_all "$AGENTS/$a.md" '`lane_ended`, `file_request`, `notice`), read from `messages`')"
+done
+check "driver: started with no lane it opens one with owner and machine" 1 \
+  "$(has_all "$DRV" 'Started with no lane' 'open one' '`lanes` action `create`' '`owner_id`' '`machine` it runs on')"
+check "driver: started on a lane it takes it" 1 \
+  "$(has_all "$DRV" 'Started on a lane' 'you take it')"
+check "driver: it writes each started item's held paths from the survey" 1 \
+  "$(has_all "$DRV" 'When an item starts' 'write the paths it holds' '`add_path`' '`held`' '`shared`' 'from its survey')"
+check "driver: it removes the paths when the item merges" 1 \
+  "$(has_all "$DRV" 'When an item merges' '`remove_path` each of its paths' '`remove_item`')"
+check "driver: it ends the lane when it is done" 1 \
+  "$(has_all "$DRV" 'When the lane is done' '`end` it' 'then send `lane_ended`')"
+check "driver: it reads which open lanes hold its paths before an item starts" 1 \
+  "$(has_all "$DRV" 'Before an item starts, ask who holds its paths' '`lane_holds`' 'files and never folders')"
+check "driver: it sends a file_request with lines, a suggested answer and a default" 1 \
+  "$(has_all "$DRV" 'one request per lane, a `file_request`' 'the `lines` you will change' 'a `suggested_answer`' 'a `default` with `default_at`')"
+check "driver: it goes on at the default and names it in the brief file" 1 \
+  "$(has_all "$DRV" 'Go on at the answer when one arrives' 'Go on at the default only when `default_at` passes with no answer' 'Name it in the brief file under `## Amendments`')"
+check "driver: it reads its lane inbox on the watch and answers in the turn it arrives" 1 \
+  "$(has_all "$DRV" '`--inbox-lane <your lane>`' 'answer a `file_request` in the turn it arrives')"
+check "driver: after a merge that changes a shared file it sends a notice" 1 \
+  "$(has_all "$DRV" 'After a merge that changes a shared file' 'send a `notice`')"
+check "driver: refs go as strings, a hold warns and never refuses" 1 \
+  "$(has_all "$DRV" 'Send every item reference in a message as a string' 'It warns and asks; it never refuses')"
+check "marshal: its lanes carry held and shared paths from the surveys" 1 \
+  "$(has_all "$MARSHAL" '`held` and `shared`' 'taken from the surveys')"
+check "marshal: it watches open lanes, its own and developers', for collisions" 1 \
+  "$(has_all "$MARSHAL" "Watch open lanes for collisions, yours and the developers'" 'two open lanes holding the same file are a collision')"
+check "marshal: it never ends a developer's lane" 1 \
+  "$(has_all "$MARSHAL" "You never end a developer's lane")"
+
+# The replay: two lanes, each with an item holding src/app.js. Lane B starts
+# its item second. Applying the driver's rule as written: B reads which open
+# lanes hold the file (lane_holds, B's own left out), sends A a file_request
+# carrying a default_at, hears nothing, and starts at the default.
+F479="$STUB/f479"; mkdir -p "$F479"
+cat > "$F479/lanes.json" <<'JSON'
+[{"name":"A","state":"open","held":[{"path":"src/app.js","item":"11"}]},
+ {"name":"B","state":"open","held":[{"path":"src/app.js","item":"12"}]}]
+JSON
+# The replay READS the rule out of driver.md, so a change to the text changes
+# what the replay does (479, review round 1): the fields the request carries,
+# one request per holder, the ISO form of default_at, the wait in minutes, and
+# what an answer, no answer before default_at and no answer after it mean.
+DT479=$(tr '\n' ' ' < "$DRV" | tr -s ' ')
+STEP1=$(printf '%s' "$DT479" | sed -n 's/.*\(1\. Send each such lane.*\) 2\. Go on with the rest.*/\1/p')
+STEP2=$(printf '%s' "$DT479" | sed -n 's/.*\(2\. Go on with the rest.*\) 3\. Name it in the brief file.*/\1/p')
+rule_has() { case "$1" in *"$2"*) return 0;; *) return 1;; esac; }
+replay_479() { # replay_479 <asking lane> <item> <file> <now epoch> <answer or empty> -> what the driver does
+  local me=$1 item=$2 file=$3 now=$4 answer=$5 holders h f mins due iso fields="" n=0
+  holders=$(jq -r --arg me "$me" --arg f "$file" \
+    '.[] | select(.state=="open" and .name!=$me) | select(any(.held[]; .path==$f)) | .name' "$F479/lanes.json")
+  [ -n "$holders" ] || { echo "start"; return; }
+  [ -n "$STEP1" ] && [ -n "$STEP2" ] || { echo "no rule"; return; }
+  : > "$F479/requests.jsonl"
+  # the wait: "no more than <number word>" minutes in the text
+  case "$STEP1" in *"no more than twenty"*) mins=20;; *) echo "no rule: no ceiling on the wait"; return;; esac
+  due=$((1000 + mins * 60)) # the request was sent at epoch 1000; now is later or earlier than its default_at
+  if rule_has "$STEP1" 'an ISO time string'; then iso=$(date -u -d "@$due" +%Y-%m-%dT%H:%M:%SZ); else iso=$due; fi
+  for f in paths item asking_lane lines suggested_answer default default_at; do
+    rule_has "$STEP1" "\`$f\`" && fields="$fields $f"
+  done
+  if rule_has "$STEP1" 'one request per lane'; then
+    for h in $holders; do
+      jq -nc --arg to "$h" --arg me "$me" --arg item "$item" --arg f "$file" --arg due "$iso" --argjson ints "$(rule_has "$STEP1" 'an ISO time string' && echo false || echo true)" --arg fields "$fields" \
+        '{type:"file_request",to_lane:$to,from_role:"driver",to_role:"driver",fields:({paths:[$f],item:$item,asking_lane:$me,lines:"1-9",suggested_answer:"go_ahead",default:"go_ahead",default_at:(if $ints then ($due|tonumber) else $due end)} | with_entries(select(.key as $k | ($fields|split(" ")|index($k)) != null)))}' >> "$F479/requests.jsonl"
+    done
+  else
+    jq -nc --arg to "$(echo $holders | tr ' ' ',')" '{type:"file_request",to_lane:$to}' >> "$F479/requests.jsonl"
+  fi
+  if [ -n "$answer" ]; then
+    case "$answer" in
+      go_ahead) rule_has "$STEP2" '`go_ahead` starts the item' && echo "start on the answer" || echo "no rule";;
+      taken) rule_has "$STEP2" 'park the item with the reason, never start it' && echo "park" || echo "start at the default";;
+      *) echo "no rule";;
+    esac
+  elif [ "$now" -lt "$due" ]; then
+    rule_has "$STEP2" 'Before `default_at`, with no answer, the item waits' && echo "wait" || echo "start at the default"
+  else
+    rule_has "$STEP2" 'only when `default_at` passes with no answer' && echo "start at the default" || echo "no rule"
+  fi
+}
+first_req() { head -1 "$F479/requests.jsonl"; }
+check "479 replay: B sends the holder, lane A, a file_request" A \
+  "$(replay_479 B 12 src/app.js 1000 '' >/dev/null; first_req | jq -r .to_lane)"
+check "479 replay: it carries every field the contract names, the item a string and default_at an ISO time" \
+  'asking_lane,default,default_at,item,lines,paths,suggested_answer string 1970-01-01T00:36:40Z driver' \
+  "$(first_req | jq -r '"\(.fields | keys | join(",")) \(.fields.item | type) \(.fields.default_at) \(.to_role)"')"
+check "479 replay: with no answer before default_at B waits" wait \
+  "$(replay_479 B 12 src/app.js 1000 '')"
+check "479 replay: with no answer once default_at has passed B starts at the default" "start at the default" \
+  "$(replay_479 B 12 src/app.js 2300 '')"
+check "479 replay: at default_at itself the wait is over" "start at the default" \
+  "$(replay_479 B 12 src/app.js 2200 '')"
+check "479 replay: a go_ahead starts the item, a taken answer parks it" "start on the answer park" \
+  "$(echo "$(replay_479 B 12 src/app.js 1000 go_ahead) $(replay_479 B 12 src/app.js 1000 taken)")"
+check "479 replay: a lane holding nothing shared starts with no request" start \
+  "$(replay_479 B 12 src/other.js 1000 '')"
+# Two holders, one request each: the API takes one lane name per message.
+cat > "$F479/lanes.json" <<'JSON'
+[{"name":"A","state":"open","held":[{"path":"src/app.js","item_id":"u1"}]},
+ {"name":"C","state":"open","held":[{"path":"src/app.js","item_id":"u3"}]},
+ {"name":"B","state":"open","held":[{"path":"src/app.js","item_id":"u2"}]}]
+JSON
+replay_479 B 12 src/app.js 1000 '' >/dev/null
+check "479 replay: two holders get one request each, to one lane name" "A C" \
+  "$(jq -r .to_lane "$F479/requests.jsonl" | tr '\n' ' ' | sed 's/ $//')"
+
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
 FAILS=$(grep -c '^FAIL$' "$TALLY")
