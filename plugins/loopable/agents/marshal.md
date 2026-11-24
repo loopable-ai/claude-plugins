@@ -453,6 +453,13 @@ Then end by telling the person how to start each lane, one command per lane, fro
 claude --agent loopable:driver "Follow lane <name>"
 ```
 
+**You may start a lane's driver as a subagent when the person asks** (the Agent
+tool, `loopable:driver`, one per lane); otherwise print the commands. What changes
+then: the drivers end with your session, and their teammates' hand-backs land at
+you, not at the driver. Do not relay them and do not hold the build reports: the
+driver reads the builder's `build-report.md` and the branch head. A driver idle
+with work pending is checked against the branch head and woken with a message.
+
 It passes no `--model`: every agent's model is pinned in its frontmatter — the
 driver, the verifier, the reviewer, the surveyor and the master builder on opus,
 the builders on sonnet, you on fable — so a lane runs the same whichever model

@@ -261,6 +261,12 @@ request body is written once, on the first push, and nobody may edit it after,
 so the report is the one place the fact stays current; the verifier reads it
 there.
 
+**Write the report of every round to `build-report.md` in the worktree's state
+directory before ending, in every mode** (`<state>/build-report.md`; overwrite it
+each round). Your hand-back may land at someone other than your driver, so the
+file and your pushed head are what the driver reads. It is the one file you write
+in the state directory; write nothing else there.
+
 ## Further rounds
 
 The driver sends a further round as a new amendment in the brief file and a

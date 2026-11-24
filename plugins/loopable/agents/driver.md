@@ -126,8 +126,8 @@ diagnosis; a `park` with the reason; `merged` with the pull request; a
 `brief_defect` the builder reports is posted as one, with the defect verbatim.
 
 **The subagents have no backlog tools on purpose** (the hook suite pins it), so
-what a builder, master builder or surveyor reports to you in its one final
-message you post for it: a `build_report` (`from_role: builder` or
+what a builder or master builder writes to `<state>/build-report.md`, and what a
+surveyor reports to you in its one final message, you post for it: a `build_report` (`from_role: builder` or
 `masterbuilder`) with the head and the pull request as fields and the report as
 `text`, a `survey` (`from_role: surveyor`), a `brief_defect`, a `question`. The
 verifier's and the reviewer's reports are posted by `ship.sh --close`. Answer a
@@ -632,7 +632,18 @@ one, the path of `<state>/survey.md`. Nothing else: do not design the change for
 it, do not paraphrase the criteria, and do not summarise the survey. Post
 `builder_started` on the item's session.
 
-Then wait. Its report arrives by itself. Never sleep, poll or watch anything in
+**A round is finished when the report file and the pushed head say so, not when
+a hand-back arrives.** The builder writes `<state>/build-report.md` before it ends,
+in every mode, because a driver started as a subagent of the marshal never
+receives its teammates' hand-backs. Read that file and check the pull request's
+head yourself (`gh pr view <pr> --json headRefOid`, or `git ls-remote origin
+<branch>`) against the sha it names before you start the verify and review round.
+Post `build_report` to Loopable from the file yourself, with the head and the pull
+request url; the builder has no backlog tool. A builder that has not written the
+file and not pushed is still working; one whose head moved is checked by its
+branch, never waited on for a message.
+
+Then wait for the report file and the pushed head, or for a background notification. Never sleep, poll or watch anything in
 the foreground; a command started with `run_in_background` notifies you when it
 exits. Do the next piece of work, or end your turn.
 
@@ -656,8 +667,8 @@ When the implementer reports its branch pushed at a sha:
    background, each with what `commands/ship.md` says it gets — the verifier the
    criteria with their verify methods, the environments, the HEAD sha and the
    evidence directory and the path of the newest build report for that head,
-   which you write first to `<state>/build-report.md` from the builder's final
-   message (it is the builder's claim, never evidence; the verifier reads a fact
+   which the builder wrote to `<state>/build-report.md` (check it names that
+   head; never write over it) (it is the builder's claim, never evidence; the verifier reads a fact
    a criterion asks to be stated from it); the reviewer the criteria, the HEAD sha and the default
    branch, and in a fix round the sha the last review was made at and the path of
    that review, from `<state>/rounds/` — plus the worktree path, and the

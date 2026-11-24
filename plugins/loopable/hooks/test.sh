@@ -4141,6 +4141,21 @@ replay_479 B 12 src/app.js 1000 '' >/dev/null
 check "479 replay: two holders get one request each, to one lane name" "A C" \
   "$(jq -r .to_lane "$F479/requests.jsonl" | tr '\n' ' ' | sed 's/ $//')"
 
+# 505: a driver started as a subagent never gets its teammates' hand-backs, so
+# the report is a file and the pushed head, and the driver posts it.
+for a in builder masterbuilder; do
+  check "505 $a: the report of every round goes to build-report.md in the state directory, in every mode" 1 \
+    "$(has_all "$AGENTS/$a.md" 'Write the report of every round to `build-report.md` in the worktree'"'"'s state directory before ending, in every mode')"
+done
+check "505 driver: a round is finished when the report file and the pushed head say so" 1 \
+  "$(has_all "$AGENTS/driver.md" 'A round is finished when the report file and the pushed head say so, not when a hand-back arrives')"
+check "505 driver: it posts build_report to Loopable from the file" 1 \
+  "$(has_all "$AGENTS/driver.md" 'Post `build_report` to Loopable from the file yourself')"
+check "505 driver: it checks the pull request's head itself before the verify and review round" 1 \
+  "$(has_all "$AGENTS/driver.md" "check the pull request's head yourself" 'before you start the verify and review round')"
+check "505 marshal: it may start a driver as a subagent when the person asks, and what changes" 1 \
+  "$(has_all "$MARSHAL" 'You may start a lane'"'"'s driver as a subagent when the person asks' 'the drivers end with your session' "hand-backs land at you" 'Do not relay them' 'A driver idle with work pending is checked against the branch head and woken')"
+
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
 FAILS=$(grep -c '^FAIL$' "$TALLY")

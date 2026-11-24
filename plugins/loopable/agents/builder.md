@@ -230,6 +230,14 @@ request body is written once, on the first push, and nobody may edit it after,
 so the report is the one place the fact stays current; the verifier reads it
 there.
 
+**Write the report of every round to `build-report.md` in the worktree's state
+directory before ending, in every mode** (`<state>/build-report.md`, `<state>` =
+`$(git -C <wt> rev-parse --absolute-git-dir)/loopable`; overwrite it each round).
+Your hand-back may land at someone other than your driver (a driver started as a
+subagent of the marshal never receives it), so the file and your pushed head are
+what the driver reads. It is the one file you write in the state directory; write
+nothing else there.
+
 ## A fix round
 
 The driver appends the round's findings to the brief file and sends you their

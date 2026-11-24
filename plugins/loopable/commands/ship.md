@@ -72,9 +72,9 @@ neither job yourself:
 - the **verifier** (`loopable:verifier`) — give it the criteria with their verify
   methods, the environments, the HEAD sha and the evidence directory, all from
   step 1, and the instruction that every status must come from a run at that sha.
-  Also the path of the newest build report for that head, which you first write
-  to `<state>/build-report.md` (the builder's final message, as it reported it;
-  none exists on a first run by hand): the builder's claim, not evidence, and
+  Also the path of the newest build report for that head, which the builder wrote
+  to `<state>/build-report.md` (a run by hand with no builder writes it itself or
+  goes without): the builder's claim, not evidence, and
   the only place a fact a criterion asks to be stated is read from.
   It writes `.git/loopable/verify.json` and `.git/loopable/verify.md`.
 - the **reviewer** (`loopable:reviewer`) — give it the criteria, the HEAD sha and
