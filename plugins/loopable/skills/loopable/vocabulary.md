@@ -24,16 +24,15 @@ owner writing a backlog, a person reading a roadmap, a coding agent picking
 something up, and a client asking what is going on — and a word that means
 four things is a word nobody can plan with.
 
-Two planes run through all of it. **Features are the nouns**: the surfaces of
+Two planes run through all of it. **Features are the nouns**: the parts of
 the product, which are never finished. **Work items are the verbs**: the
-things that happen to those surfaces, which are. Tags join them.
+things that happen to those features, which are. Tags join them.
 
 ## Feature
 
-A feature is a part of the product a person can point at — a page, a flow, a
-report, an integration.
+A feature is a part of the product that people use or depend on, and it is never finished — a page, an agent, a set of rules or the infrastructure underneath.
 
-**When.** Whenever there is a surface somebody could name and ask about. It
+**When.** Whenever there is a part of the product somebody could name and ask about. It
 carries a lifecycle rather than a finish line: proposed, then building, then
 live, and it stays live while work keeps happening to it. It leaves only by
 decision — retired when it is switched off, superseded when another feature
@@ -48,7 +47,7 @@ with them. A studio caller writes a feature, a person or a token, and the record
 names both; the product owner and a client propose one, and a person accepts it.
 
 **Kinds.** Every feature is exactly one of four kinds — a surface, an agent, an
-automation or a service, defined next — and every feature has a named owner, a
+automation or a service, defined below — and every feature has a named owner, a
 person who answers for it. The rule of thumb: ask what the feature is to
 someone using the product. If they look at it and touch it, it is a surface; if
 it holds a conversation or makes judgements from its own instructions and
@@ -103,7 +102,7 @@ to follow its stories'.
 
 **Not when.** Not a pile of unrelated chores, not a sprint, not one person's
 list, and not a feature in disguise — if it can never be finished, it is a
-surface and belongs on the other plane.
+feature and belongs on the other plane.
 
 **Why.** The roadmap is read by people who do not read the backlog. An epic is
 the unit they read, so it has to be a sentence about them and not about us.
@@ -140,10 +139,10 @@ written down, and calling it a story would put noise on the roadmap.
 
 ## Bug
 
-A bug is something that worked and does not, on a surface that already
+A bug is something that worked and does not, in a feature that already
 exists.
 
-**When.** With `feature_ids` naming the surface that is broken. It stands
+**When.** With `feature_ids` naming the feature that is broken. It stands
 alone: no parent, no children.
 
 **Not when.** Not for a missing thing that was never promised — that is a
@@ -235,7 +234,7 @@ things that could change the plan without anybody choosing to.
 and a date by which somebody looks at it again. Entries are mitigated and
 closed, never deleted.
 
-**Not when.** Not a bug, which is something already broken on a surface, and
+**Not when.** Not a bug, which is something already broken in a feature, and
 not a task to fix one.
 
 **Why.** A risk somebody saw and nobody wrote down becomes a surprise. Reviews
