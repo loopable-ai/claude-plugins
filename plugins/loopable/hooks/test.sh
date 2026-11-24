@@ -4018,6 +4018,13 @@ verdict_458() {
 }
 check "453 shape: the source verifier.md names holds the fact in the file, so pass" pass "$(verdict_458)"
 
+# 483: the skill's tool table has a features row and sends a new feature nowhere near propose
+SKILLM="$HERE/../skills/loopable/SKILL.md"
+check "SKILL.md tool table has a features row" 1 \
+  "$(grep -c '^| `features` |' "$SKILLM")"
+check "SKILL.md does not send a new feature to propose" 0 \
+  "$(grep -ci 'propose.*kind feature\|kind feature.*propose' "$SKILLM")"
+
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
 FAILS=$(grep -c '^FAIL$' "$TALLY")
