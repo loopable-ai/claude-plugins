@@ -3340,10 +3340,17 @@ check "the marshal tags, writes the status with the features tool and reports it
        flat "$MARSHAL" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | grep . || echo none)"
 check "the marshal's Ready rule does not count no_feature" 1 \
   "$(flat "$MARSHAL" | grep -cF 'a `no_feature` entry is a warning like the others')"
-check "marshal, driver and plan: the new sentences, words absent before 474" none \
+check "marshal, driver and plan: the feature-tagging sentences" none \
   "$(for f in "$MARSHAL" "$AGENTS/driver.md" "$PLAN"; do
        for w in 'kind and owner' 'is tagged to a feature' '`feature_ids` on `add_item`' 'features` tool, with its kind' ; do
          flat "$f" | grep -qiF -- "$w" || printf '[%s: %s] ' "$(basename "$(dirname "$f")")/$(basename "$f")" "$w"; done; done | grep . || echo none)"
+# Per file: a client's work still goes through propose, and the feature is created
+# in the same turn as the epic or story. One word each, so a file that loses the
+# sentence names itself.
+check "marshal, driver and plan each say a client's work still goes through propose, and the same-turn sentence" none \
+  "$(for f in "$MARSHAL" "$AGENTS/driver.md" "$PLAN"; do
+       for w in 'asked for still goes through `propose`' 'in the same turn'; do
+         flat "$f" | grep -qF -- "$w" || printf '[%s: %s] ' "$(basename "$(dirname "$f")")/$(basename "$f")" "$w"; done; done | grep . || echo none)"
 check "the eval stand-in gives no_feature to a story with feature_count 0 and to nothing else" \
   "story:['no_brief', 'no_verifiable_criterion', 'no_feature'] tagged:['no_brief', 'no_verifiable_criterion'] nocount:['no_brief', 'no_verifiable_criterion'] epic:['no_brief', 'no_verifiable_criterion']" \
   "$(PYTHONDONTWRITEBYTECODE=1 python3 -c '
