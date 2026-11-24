@@ -429,6 +429,31 @@ class TheStandIns(unittest.TestCase):
         finally:
             w.close()
 
+    def test_add_item_tags_through_feature_ids_and_a_refused_create_files_nothing(self):
+        """531: the marshal files a tagged item (add_item with feature_ids); the
+        stand-in resolves them as revise does, and a refused one spends no ref."""
+        w = Walk('after-merge')
+        try:
+            p = w.fx['project']
+            made = w.tool('features', {'project_id': p, 'action': 'create',
+                                       'fields': {'title': 'Checkout', 'kind': 'service'}})['feature']
+            for n, ids in enumerate(([str(made['ref'])], ['f' + str(made['ref'])], [made['id']])):
+                w.tool('add_item', {'project_id': p, 'title': 'tagged %d' % n, 'kind': 'task', 'feature_ids': ids})
+                ref = str(w.tool('list_backlog', {'project_id': p, 'status': 'todo'})['items'][-1]['ref'])
+                got = w.tool('get_item', {'project_id': p, 'item_id': ref})['item']
+                self.assertEqual(got['feature_ids'], [made['id']])
+                self.assertNotIn('no_feature', got['ready_blockers'] or [])
+            # A feature that does not exist, or a non-list: refused, nothing filed, no ref spent.
+            before = w.json('.loopable-eval/backlog.json')
+            for ids in (['f999'], [made['ref'], 'f999'], 'f1'):
+                w.tool('add_item', {'project_id': p, 'title': 'refused', 'kind': 'task', 'feature_ids': ids}, ok=False)
+            after = w.json('.loopable-eval/backlog.json')
+            self.assertEqual(after['next_ref'], before['next_ref'])
+            self.assertEqual(after['items'], before['items'])
+            self.assertEqual(after.get('tags'), before.get('tags'))
+        finally:
+            w.close()
+
     def test_get_item_answers_with_the_apis_six_top_level_keys(self):
         """The API's get_item gives item, brief, children, links, trail and graph:
         lists and an object. The fake gives the same keys, no more, in those types."""

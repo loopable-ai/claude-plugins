@@ -290,6 +290,13 @@ class Backlog:
             parent = self.item(parent)['id']
             if kind == 'bug':
                 raise Refused(422, 'A bug stands alone: it has no parent.')
+        # The tags resolve before anything is appended: a refused id files
+        # nothing and spends no ref, as revise keeps the old words.
+        ids = None
+        if a.get('feature_ids') is not None:
+            if not isinstance(a['feature_ids'], list):
+                raise Refused(400, 'feature_ids must be a list.')
+            ids = [self.feature(f)['id'] for f in a['feature_ids']]
         self.s['next_ref'] += 1
         ref = self.s['next_ref']
         iid = str(uuid.UUID(int=(0x17e4 << 112) + ref))
@@ -297,6 +304,8 @@ class Backlog:
               'status_note': None, 'parent_id': parent, 'body': a.get('body'), 'ask': None,
               'brief_rev': 0, 'criteria': []}
         self.s['items'][iid] = it
+        if ids is not None:
+            self.tag(it, ids)
         return it
 
 
