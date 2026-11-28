@@ -46,7 +46,7 @@ loopable_state_put item "$ITEM"
 # The repository as a person would name it — `owner/name` from the remote,
 # else the directory. It is a label on the session row, not an identifier.
 REPO_NAME=$(git -C "$(loopable_repo)" remote get-url origin 2>/dev/null |
-  sed -E 's|^.*[:/]([^/:]+/[^/]+?)(\.git)?$|\1|') || REPO_NAME=""
+  loopable_repo_name) || REPO_NAME=""
 [ -n "$REPO_NAME" ] || REPO_NAME=$(basename "$(loopable_repo)" 2>/dev/null) || REPO_NAME=""
 
 HARNESS=claude-code

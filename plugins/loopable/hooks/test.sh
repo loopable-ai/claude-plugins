@@ -4156,6 +4156,19 @@ check "505 driver: it checks the pull request's head itself before the verify an
 check "505 marshal: it may start a driver as a subagent when the person asks, and what changes" 1 \
   "$(has_all "$MARSHAL" 'You may start a lane'"'"'s driver as a subagent when the person asks' 'the drivers end with your session' "hand-backs land at you" 'Do not relay them' 'A driver idle with work pending is checked against the branch head and woken')"
 
+echo " the repo name is extracted with POSIX ERE only (523):"
+for pair in 'git@github.com:owner/repo.git=owner/repo' 'https://github.com/owner/repo=owner/repo' \
+  'https://github.com/owner/repo.git=owner/repo' 'ssh://git@github.com/owner/repo.git=owner/repo' \
+  'https://github.com/owner/repo/=owner/repo'; do
+  check "523 repo name: ${pair%%=*}" "${pair#*=}" "$(printf '%s\n' "${pair%%=*}" | loopable_repo_name)"
+done
+# BSD sed refuses `+?`, `*?` and `??`; the suite cannot run BSD sed here, so it
+# reads the three files that hold the extraction for a non-greedy operator.
+check "523 no non-greedy operator in the extraction (lib, start, session-start)" 0 \
+  "$(cat "$HERE/lib.sh" "$HERE/session-start.sh" "$HERE/../bin/start.sh" | grep -E "sed -E" | grep -cE '[]+*?)][+*?]\?')"
+check "523 start.sh and session-start.sh both call the one extraction" 2 \
+  "$(grep -lF 'loopable_repo_name' "$HERE/session-start.sh" "$HERE/../bin/start.sh" | wc -l | tr -d ' ')"
+
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
 FAILS=$(grep -c '^FAIL$' "$TALLY")

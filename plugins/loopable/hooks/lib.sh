@@ -103,6 +103,13 @@ loopable_repo() {
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
   git rev-parse --show-toplevel 2>/dev/null
 }
+# THE REPOSITORY AS A PERSON NAMES IT: `owner/name` from the remote URL on
+# stdin (scp-style or https, with or without `.git`), nothing when it has no
+# such shape. POSIX extended regular expressions only: BSD sed on macOS
+# refuses the non-greedy `+?` (523), so `.git` is stripped in its own step.
+loopable_repo_name() {
+  sed -E 's|/+$||; s|\.git$||; s|^.*[:/]([^/:]+/[^/:]+)$|\1|'
+}
 loopable_config_file() {
   local r; r=$(loopable_repo) || return 1
   [ -n "$r" ] && [ -r "$r/.loopable.yaml" ] || return 1

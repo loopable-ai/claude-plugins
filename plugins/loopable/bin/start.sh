@@ -493,7 +493,7 @@ another agent may take it. $AGAIN"
 # an earlier attempt, and is resumed here; on another branch this says whose it
 # is and the SessionStart hook in that worktree decides what to join.
 REPO_NAME=$(git -C "$REPO" remote get-url origin 2>/dev/null |
-  sed -E 's|^.*[:/]([^/:]+/[^/]+?)(\.git)?$|\1|') || REPO_NAME=""
+  loopable_repo_name) || REPO_NAME=""
 [ -n "$REPO_NAME" ] || REPO_NAME=$(basename "$REPO")
 SESSION=""; HELD_BY=""; HELD_ON=""; REFUSED=""; RESUMED=""
 if REPLY=$(loopable_post_reply "/agent/projects/$PROJECT/sessions" \
