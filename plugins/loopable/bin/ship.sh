@@ -46,15 +46,23 @@
 # the merge guard refuses a merge at that HEAD while its close says `fail`.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# A command was ASKED for the backlog, so it waits 30 s unless told otherwise.
+# Set BEFORE lib.sh: its own default (4, for the hooks) is a `:-` too, and
+# whichever runs first wins.
+LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-30}"
 # shellcheck source=/dev/null
 . "$HERE/../hooks/lib.sh"
 
-# Long enough for a cold Aurora and an S3 round trip, short enough that a
-# person does not wonder whether it has hung.
-LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-20}"
-
 say() { printf '%s\n' "$*"; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
+# curl exit 28 is a timeout; say so, and after how long, instead of "did not
+# answer" for a backlog that was merely slow. api() leaves the curl status in
+# API_CURL_FILE for the same subshell reason as the HTTP status.
+unanswered() { # unanswered <item> <detail> -> "The backlog <...> for <item> (<detail>)."
+  if [ "$(cat "$API_CURL_FILE" 2>/dev/null)" = 28 ]; then
+    printf 'The backlog timed out after %ss for %s' "$LOOPABLE_MAX_TIME" "$1"
+  else printf 'The backlog did not answer for %s (%s)' "$1" "$2"; fi
+}
 
 MODE=""
 TRAILER=""
@@ -178,7 +186,8 @@ EVIDENCE="$REPORTS/evidence"
 # sets is gone by the time the caller reads it. That bug is invisible until
 # the day something refuses and the refusal says "HTTP 0".
 API_CODE_FILE="${TMPDIR:-/tmp}/loopable-ship-$$.code"
-trap 'rm -f "$API_CODE_FILE"' EXIT
+API_CURL_FILE="${TMPDIR:-/tmp}/loopable-ship-$$.curl"
+trap 'rm -f "$API_CODE_FILE" "$API_CURL_FILE"' EXIT
 api_code() { cat "$API_CODE_FILE" 2>/dev/null || printf '0'; }
 api() { # api <METHOD> <path> [json body] -> the body on stdout, the status in api_code
   local out code token
@@ -192,7 +201,8 @@ api() { # api <METHOD> <path> [json body] -> the body on stdout, the status in a
   out=$(curl -sS --max-time "$LOOPABLE_MAX_TIME" -X "$1" \
     -w '\n%{http_code}' \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    ${data[@]+"${data[@]}"} "$LOOPABLE_API$2" 2>/dev/null) || { printf '0' > "$API_CODE_FILE"; return 1; }
+    ${data[@]+"${data[@]}"} "$LOOPABLE_API$2" 2>/dev/null) || { printf '%s' "$?" > "$API_CURL_FILE"; printf '0' > "$API_CODE_FILE"; return 1; }
+  : > "$API_CURL_FILE"
   code=$(printf '%s' "$out" | tail -1)
   printf '%s' "$code" > "$API_CODE_FILE"
   printf '%s' "$out" | sed '$d'
@@ -207,7 +217,7 @@ api_message() { # the API's own sentence, or a fallback
 # ============================================================== --prepare ==
 if [ "$MODE" = prepare ]; then
   ANSWER=$(api GET "/agent/projects/$PROJECT/items/$ITEM/pack") || die \
-    "The backlog did not answer for $ITEM ($(api_message "$ANSWER")). Nothing has been changed."
+    "$(unanswered "$ITEM" "$(api_message "$ANSWER")"). Nothing has been changed."
   PACK=$(printf '%s' "$ANSWER" | jq -c '.pack // empty' 2>/dev/null)
   [ -n "$PACK" ] || die "The pack for $ITEM came back empty. Nothing has been changed."
   field() { printf '%s' "$PACK" | jq -r "$1 // empty"; }
@@ -342,7 +352,7 @@ esac
 # rows is still a report, and a criterion that was edited between prepare and
 # close should fail loudly rather than bind to whatever sat in that slot.
 ITEM_JSON=$(api GET "/agent/projects/$PROJECT/items/$ITEM") || die \
-  "The backlog did not answer for $ITEM ($(api_message "$ITEM_JSON")). Nothing has been closed."
+  "$(unanswered "$ITEM" "$(api_message "$ITEM_JSON")"). Nothing has been closed."
 BRIEF_REV=$(printf '%s' "$ITEM_JSON" | jq -r '.brief.brief_rev // 0')
 KNOWN=$(printf '%s' "$ITEM_JSON" | jq -c '.brief.criteria // []')
 [ "$(printf '%s' "$KNOWN" | jq 'length')" != 0 ] || die \

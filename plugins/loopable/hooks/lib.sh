@@ -33,7 +33,9 @@ loopable_token() {
 # somebody's session on its own bookkeeping, so it gives up early and silently;
 # `bin/start.sh` was ASKED for the backlog and has nothing to do without it, so
 # it waits longer and reports what went wrong. Four seconds stays the default,
-# and every hook keeps the budget it was written with.
+# and every hook keeps the budget it was written with. `bin/start.sh` and
+# `bin/ship.sh` set 30 BEFORE sourcing this file, so this line only supplies
+# the hooks' 4; an explicit LOOPABLE_MAX_TIME wins everywhere.
 LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-4}"
 
 loopable_get() { # loopable_get <path> -> body on stdout, non-zero if unreachable
@@ -167,13 +169,13 @@ loopable_items() {
   local me projects
   projects=$(loopable_config project) || projects=""
   if [ -z "$projects" ]; then
-    me=$(loopable_get /agent/whoami) || return 1
+    me=$(loopable_get /agent/whoami) || return $?
     projects=$(printf '%s' "$me" | jq -r '.projects[].id') || return 1
   fi
   local p
   for p in $projects; do
     loopable_get "/agent/projects/$p/items" |
-      jq -r '.items[] | [.id, .status, .title, .ref] | @tsv' 2>/dev/null || return 1
+      jq -r '.items[] | [.id, .status, .title, .ref] | @tsv' 2>/dev/null || return $?
   done
 }
 
@@ -465,7 +467,7 @@ loopable_branch() {
 loopable_project() {
   local p me
   p=$(loopable_config project) && [ -n "$p" ] && { printf '%s' "$p"; return; }
-  me=$(loopable_get /agent/whoami) || return 1
+  me=$(loopable_get /agent/whoami) || return $?
   p=$(printf '%s' "$me" | jq -r '.projects | if length == 1 then .[0].id else empty end') || return 1
   [ -n "$p" ] || return 1
   printf '%s' "$p"

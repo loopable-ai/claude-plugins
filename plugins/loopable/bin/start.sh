@@ -38,14 +38,22 @@
 # helper finishes a half-done start where a wall makes somebody clear it.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# A command was ASKED for the backlog, so it waits 30 s unless told otherwise.
+# Set BEFORE lib.sh: its own default (4, for the hooks) is a `:-` too, and
+# whichever runs first wins.
+LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-30}"
 # shellcheck source=/dev/null
 . "$HERE/../hooks/lib.sh"
 
-# Long enough for a cold Aurora, short enough that a person does not wonder.
-LOOPABLE_MAX_TIME="${LOOPABLE_MAX_TIME:-20}"
-
 say() { printf '%s\n' "$*"; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
+# Why a read of the backlog failed, in words: curl exit 28 is a timeout, and
+# "did not answer" for a backlog that was merely slow sent a driver away twice.
+# `unanswered <curl status> <what>` -> "The backlog <did not answer | timed out after Ns> <what>."
+unanswered() {
+  if [ "$1" = 28 ]; then printf 'The backlog timed out after %ss %s.' "$LOOPABLE_MAX_TIME" "$2"
+  else printf 'The backlog did not answer %s.' "$2"; fi
+}
 
 ARG="${1:-}"
 [ -n "$ARG" ] || die "Which item? Usage: /loopable:start <item id | ref | next>"
@@ -78,7 +86,7 @@ and this token can see more than one. Name it in the config."
 # (S1.10) this file does not have to learn it.
 if [ "$ARG" = next ] || [ "$ARG" = --next ]; then
   ANSWER=$(loopable_get "/agent/projects/$PROJECT/items/next-ready") || die \
-    "The backlog did not answer $LOOPABLE_API. Nothing has been created or reported."
+    "$(unanswered $? "$LOOPABLE_API") Nothing has been created or reported."
   PACK=$(printf '%s' "$ANSWER" | jq -c '.pack // empty' 2>/dev/null)
   [ -n "$PACK" ] || die \
     "Nothing to pick up: no item is \`ready\` and free right now. Everything ready is
@@ -86,12 +94,12 @@ already being worked, or nothing has been groomed yet. Name an item instead, or 
 the product owner to groom the backlog."
 else
   ITEMS=$(loopable_items) || die \
-    "The backlog did not answer $LOOPABLE_API. Nothing has been created or reported."
+    "$(unanswered $? "$LOOPABLE_API") Nothing has been created or reported."
   ITEM_ID=$(loopable_resolve_ref "$ARG" "$ITEMS") || die \
     "No item in this project answers to '$(loopable_safe "$ARG")' — an id this token cannot see,
 or a prefix that matches more than one. Use the full id."
   ANSWER=$(loopable_get "/agent/projects/$PROJECT/items/$ITEM_ID/pack") || die \
-    "The backlog did not answer for $ITEM_ID. Nothing has been created or reported."
+    "$(unanswered $? "for $ITEM_ID") Nothing has been created or reported."
   PACK=$(printf '%s' "$ANSWER" | jq -c '.pack // empty' 2>/dev/null)
   [ -n "$PACK" ] || die "The pack for $ITEM_ID came back empty. Nothing has been created or reported."
 fi

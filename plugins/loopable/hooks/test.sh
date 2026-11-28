@@ -136,10 +136,11 @@ cat > "$STUB/curl" <<'CURL'
 # session hooks can be asserted on what they SENT rather than on what they
 # printed — which for three of the four is deliberately nothing.
 [ "${STUB_API_DOWN:-}" = 1 ] && exit 22
-M=GET; U=; B=; WANT_CODE=
+M=GET; U=; B=; WANT_CODE=; MT=
 while [ $# -gt 0 ]; do
   case "$1" in
     -X) M=$2; shift ;;
+    --max-time) MT=$2; shift ;;
     --data-binary) B=$2; shift ;;
     # bin/ship.sh asks for the status alongside the body, because a 422 from
     # the close contract names every missing field and that sentence is worth
@@ -150,6 +151,12 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "${STUB_CALLS:-}" ] && printf '%s\t%s\t%s\n' "$M" "$U" "$B" >> "$STUB_CALLS"
+# A SLOW BACKLOG (539): STUB_SLOW is how many seconds it takes to answer, and
+# the stub honours --max-time as curl does: past the budget it exits 28.
+if [ -n "${STUB_SLOW:-}" ]; then
+  if [ -n "$MT" ] && [ "$MT" -lt "$STUB_SLOW" ]; then sleep "$MT"; exit 28; fi
+  sleep "$STUB_SLOW"
+fi
 # THE CLAIM CAN FAIL ON ITS OWN (359): the pack was read, the worktree made, and
 # then the report is refused. Recorded first, so a case can see it was tried.
 # ANOTHER START LANDING MEANWHILE: the driver runs several from one checkout,
@@ -1978,6 +1985,19 @@ check "the backlog unreachable — exits non-zero" 1 "$RC"
 # is never coming.
 check "and SAYS so, unlike a hook"     1 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
 
+# A SLOW BACKLOG IS NOT A SILENT ONE (539). start.sh was ASKED for the backlog:
+# its default budget is 30 s (lib.sh's 4 is the hooks'), an explicit
+# LOOPABLE_MAX_TIME wins, and a timeout says so and after how long.
+STUB_SLOW=6 run_start "$READY" >/dev/null
+check "a backlog that answers after 6 s — start.sh succeeds, on its default budget" 0 "$RC"
+STUB_SLOW=3 LOOPABLE_MAX_TIME=1 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
+check "a backlog slower than the budget — exits non-zero" 1 "$RC"
+check "  says it timed out after 1s"       1 "$(printf '%s\n' "$OUT" | grep -c 'timed out after 1s')"
+check "  and does not say it did not answer" 0 "$(printf '%s\n' "$OUT" | grep -c 'did not answer')"
+check "  and created no session"           0 "$(sent POST '/sessions')"
+# The hooks keep their short budget: lib.sh alone still says 4.
+check "the hooks' budget is still 4 s" 4 "$(env -u LOOPABLE_MAX_TIME bash -c '. "$1"; printf %s "$LOOPABLE_MAX_TIME"' _ "$HERE/lib.sh")"
+
 mv "$SRT/.loopable.yaml" "$SRT/.loopable.yaml.off"
 run_start "$READY" >/dev/null; OUT=$(cat "$STUB/out")
 check "no .loopable.yaml — refused"    1 "$RC"
@@ -2555,6 +2575,13 @@ check "and where the reports go"       1 "$(shipped | grep -c 'Where the reports
 # LAST RUN'S REPORT IS THIS RUN'S LIE — it described another commit.
 check "a stale report is cleared"      0 "$([ -e "$SDIR2/verify.json" ] && echo 1 || echo 0)"
 check "and it says it cleared it"      1 "$(shipped | grep -c 'previous run')"
+
+# A SLOW BACKLOG IS NOT A SILENT ONE (539), here too: ship.sh says it timed out
+# and after how long, and never that the backlog did not answer.
+STUB_SLOW=3 LOOPABLE_MAX_TIME=1 run_ship --prepare
+check "a backlog slower than the budget — exits non-zero" 1 "$RC"
+check "  says it timed out after 1s"   1 "$(shipped | grep -c 'timed out after 1s')"
+check "  and does not say it did not answer" 0 "$(shipped | grep -c 'did not answer')"
 
 echo
 echo " --prepare ships on an open session, and opens the next after a close:"
