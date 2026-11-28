@@ -411,6 +411,13 @@ An item's status is not a lane field: the lane read shows it from the backlog.
 Read the lane back with `lanes` (`get`) after writing it and say the items you
 saw.
 
+**Assign each item you put in a lane to the lane's owner.** When you write or
+rewrite a lane, `revise` (`assignee_id`, the lane's owner) every item in it that
+has no assignee. An item already assigned to somebody else stays as it is, and
+your reply names it and who has it. The batch report says which items you
+assigned. You assign only in a lane you wrote, and ending a lane unassigns
+nothing: the assignee is who has the item, not which lane ran it.
+
 Each order goes the same way with the `orders` tool, below.
 
 **When the lanes tool is unreachable or answers an error** (the MCP is down, a

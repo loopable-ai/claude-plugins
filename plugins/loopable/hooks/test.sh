@@ -3499,6 +3499,11 @@ check "the survey path, the other lanes and the budget are lane fields, not fold
        printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 check "the marshal no longer folds a lane field into decided text" none \
   "$(printf '%s' "$MARSHAL_FLAT" | grep -oE 'holds no field for the survey path|`budget_hours`' | sort -u | tr '\n' ' ' | sed 's/ $//' | grep . || echo none)"
+check "the marshal assigns each item it puts in a lane to the lane's owner with revise (554)" none \
+  "$(for w in "**Assign each item you put in a lane to the lane's owner.**" '`revise` (`assignee_id`, the lane'"'"'s owner) every item in it that has no assignee' \
+              'An item already assigned to somebody else stays as it is, and your reply names it' \
+              'The batch report says which items you assigned' 'ending a lane unassigns nothing'; do
+       printf '%s' "$MARSHAL_FLAT" | grep -qF -- "$w" || printf '[%s] ' "$w"; done | sed 's/ $//' | grep . || echo none)"
 check "the driver's start command names the lane's name in Loopable" 1 \
   "$(printf '%s' "$MARSHAL_FLAT" | grep -cF 'with `<name>` the lane'"'"'s name in Loopable' | sed 's/^[1-9][0-9]*$/1/')"
 # The lane template is the fenced block that opens with `# Lane <name>`.
