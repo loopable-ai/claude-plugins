@@ -184,13 +184,15 @@ api() { # api <METHOD> <path> [json body] -> the body on stdout, the status in a
   local out code token
   local -a data=()
   token=$(loopable_token)
+  # Bash 3.2 (macOS) treats an empty array as unset under set -u, so the
+  # expansion below is guarded.
   # An ARRAY, not `${3:+--data-binary "$3"}`: a JSON body has spaces in it and
   # an unquoted expansion would hand curl a dozen arguments.
   [ $# -ge 3 ] && data=(--data-binary "$3")
   out=$(curl -sS --max-time "$LOOPABLE_MAX_TIME" -X "$1" \
     -w '\n%{http_code}' \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    "${data[@]}" "$LOOPABLE_API$2" 2>/dev/null) || { printf '0' > "$API_CODE_FILE"; return 1; }
+    ${data[@]+"${data[@]}"} "$LOOPABLE_API$2" 2>/dev/null) || { printf '0' > "$API_CODE_FILE"; return 1; }
   code=$(printf '%s' "$out" | tail -1)
   printf '%s' "$code" > "$API_CODE_FILE"
   printf '%s' "$out" | sed '$d'
@@ -441,7 +443,7 @@ upload() { # upload <path> <content-type> -> the attachment id, or nothing
 $(printf '%s' "$req" | jq -r '.upload.fields // {} | to_entries[] | [.key, .value] | @tsv')
 EOF
   form+=(-F "file=@$path;type=$type")
-  curl -sS --max-time "$LOOPABLE_MAX_TIME" -o /dev/null -f "${form[@]}" "$url" 2>/dev/null || {
+  curl -sS --max-time "$LOOPABLE_MAX_TIME" -o /dev/null -f ${form[@]+"${form[@]}"} "$url" 2>/dev/null || {
     say "  ! $name — the bytes did not reach the bucket" >&2; return 1; }
 
   local conf

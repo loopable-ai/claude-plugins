@@ -4169,6 +4169,17 @@ check "523 no non-greedy operator in the extraction (lib, start, session-start)"
 check "523 start.sh and session-start.sh both call the one extraction" 2 \
   "$(grep -lF 'loopable_repo_name' "$HERE/session-start.sh" "$HERE/../bin/start.sh" | wc -l | tr -d ' ')"
 
+# bash < 4.4 (macOS 3.2) reads an empty array as unset under set -u, so every
+# whole-array expansion in the scripts must be the guarded form
+# ${a[@]+"${a[@]}"}. No bash 3.2 runs here; this reads the source.
+echo " no unguarded array expansion under set -u (532):"
+check '532 ship.sh has no bare "${array[@]}" expansion' 0 \
+  "$(grep -cE '(^|[^+])"\$\{[A-Za-z_]+\[@\]\}"' "$HERE/../bin/ship.sh")"
+check '532 start.sh and watch.sh have no bare "${array[@]}" expansion' 0 \
+  "$(cat "$HERE/../bin/start.sh" "$HERE/../bin/watch.sh" | grep -cE '(^|[^+])"\$\{[A-Za-z_]+\[@\]\}"')"
+check '532 ship.sh api() and the upload form use the guarded form' 2 \
+  "$(grep -cE '\$\{(data|form)\[@\]\+"\$\{(data|form)\[@\]\}"\}' "$HERE/../bin/ship.sh")"
+
 echo
 CHECKS=$(wc -l < "$TALLY" | tr -d ' ')
 FAILS=$(grep -c '^FAIL$' "$TALLY")
