@@ -490,6 +490,41 @@ loopable_patch "/agent/projects/$PROJECT/items/$ITEM_ID" "$CLAIM" >/dev/null || 
   "Reporting \`in_progress\` failed — the backlog still shows this item as \`$STATUS\`, and
 another agent may take it. $AGAIN"
 
+# ----------------------------------------------------- 5b. who has it (553) --
+#
+# THE FACTORY SETS THE ASSIGNEE: an item nobody has goes to the person the
+# token acts for, over the PATCH the MCP's revise calls with assignee_id, and
+# `me` is how that route says "the caller". An item somebody else has is
+# started as it always was and NOT reassigned; the warning names who has it.
+# Nothing here fails the start, as readiness never does: the claim stands, and
+# what went wrong is printed and recorded on the session beside the readiness
+# warnings. Nothing unassigns an item when its session closes or its pull
+# request merges.
+ASSIGN_NOTE=""
+CUR_ASSIGNEE=$(field '.item.assignee_id')
+CUR_NAME=$(field '.item.assignee_name')
+if [ -z "$CUR_ASSIGNEE" ]; then
+  if loopable_patch "/agent/projects/$PROJECT/items/$ITEM_ID" '{"assignee_id":"me"}' >/dev/null; then
+    ASSIGN_NOTE="Assigned to the person this token acts for."
+    ASSIGNED_OK=1
+  else
+    ASSIGN_RC=$?
+    if [ "$ASSIGN_RC" = 28 ]; then
+      ASSIGN_NOTE="Warning — the assignment timed out after ${LOOPABLE_MAX_TIME}s; the item is started and still unassigned."
+    else
+      ASSIGN_NOTE="Warning — the assignment was refused or unanswered; the item is started and still unassigned."
+    fi
+  fi
+else
+  ME_ID=$(loopable_get /agent/whoami 2>/dev/null | jq -r '.id // empty' 2>/dev/null) || ME_ID=""
+  if [ -z "$ME_ID" ]; then
+    ASSIGN_NOTE="Warning — this item is assigned to $(loopable_safe "${CUR_NAME:-somebody}"), and the backlog did not say who this token acts for; nothing was reassigned."
+  elif [ "$ME_ID" != "$CUR_ASSIGNEE" ]; then
+    ASSIGN_NOTE="Warning — this item is already assigned to $(loopable_safe "${CUR_NAME:-somebody else}"); started anyway and not reassigned."
+  fi
+fi
+[ -n "$ASSIGN_NOTE" ] && [ -z "${ASSIGNED_OK:-}" ] && ASSIGN_WARN=1 || ASSIGN_WARN=""
+
 # ----------------------------------------------------------- 6. the session --
 #
 # The same payload session-start.sh posts, for the same reason it posts it: the
@@ -565,6 +600,10 @@ if [ -n "$SESSION" ]; then
 $WARNINGS" ||
       say "The readiness warnings could not be recorded on the session."
   fi
+  if [ -n "$ASSIGN_NOTE" ]; then
+    loopable_post_activity "$PROJECT" "$SESSION" action "$ASSIGN_NOTE" ||
+      say "The assignment note could not be recorded on the session."
+  fi
   if [ -n "$GITDIR" ] && mkdir -p "$GITDIR/loopable" 2>/dev/null; then
     printf '%s' "$ITEM_ID" > "$GITDIR/loopable/item"
     printf '%s' "$SESSION" > "$GITDIR/loopable/session"
@@ -606,6 +645,7 @@ say "  worktree  $WORKTREE${REUSED:+ (reused)}"
 say "  session   ${SESSION:-none}"
 say "  status    in_progress (reported)"
 say
+if [ -n "$ASSIGN_NOTE" ]; then say "$ASSIGN_NOTE"; say; fi
 if [ -n "$WARNINGS" ]; then
   say "Warning — started anyway; what is missing:"
   say "$WARNINGS"

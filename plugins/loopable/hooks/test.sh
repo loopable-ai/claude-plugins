@@ -169,6 +169,12 @@ if [ "$M" = PATCH ] && [ -n "${STUB_SIBLING:-}" ]; then
   else git -C "$1" branch "$2" origin/main >/dev/null 2>&1; fi
 fi
 [ "$M" = PATCH ] && [ "${STUB_PATCH_FAIL:-}" = 1 ] && exit 22
+# THE ASSIGNMENT CAN FAIL ON ITS OWN (553): only the PATCH that carries an
+# assignee_id. 500 is a refusal (curl -f exits 22), timeout is curl's 28.
+if [ "$M" = PATCH ] && printf '%s' "$B" | grep -q '"assignee_id"'; then
+  [ "${STUB_ASSIGN_FAIL:-}" = 500 ] && exit 22
+  [ "${STUB_ASSIGN_FAIL:-}" = timeout ] && exit 28
+fi
 answer() { # answer <body> [code]
   printf '%s' "$1"
   [ -n "$WANT_CODE" ] && printf '\n%s' "${2:-200}"
@@ -192,7 +198,7 @@ case "$U" in
   */messages)
     [ -n "${STUB_MESSAGE_FAIL:-}" ] && answer '{"message":"refused"}' 500
     answer '{"message":{"id":"m-1"}}' 201 ;;
-  */agent/whoami)  answer '{"projects":[{"id":"p-1"}]}' ;;
+  */agent/whoami)  answer '{"id":"me-1","projects":[{"id":"p-1"}]}' ;;
   */items)         answer "$(cat "$STUB_ITEMS")" ;;
   # The brief pack, under its two doors — BOTH BEFORE `*/items/*`, which would
   # otherwise swallow them. The routes themselves need the same ordering for
@@ -1886,7 +1892,7 @@ READY_TITLE='S2.4 · The start command'
 pack_ready() { cat > "$STUB_PACK" <<JSON
 {"pack":{"item":{"id":"$READY","kind":"story","title":"$READY_TITLE",
   "ask":"Start work in one step","body":"","status":"ready","status_note":"",
-  "brief_rev":3,"ready_blockers":[]},
+  "brief_rev":3,"ready_blockers":[],"assignee_id":"me-1","assignee_name":"Me"},
  "criteria":[{"text":"A refusal names the blockers","verify":"test","status":"open"}],
  "neighbourhood":{"nodes":[["story","The start command"],["feature","The loopable plugin"]],
    "edges":[{"relation":"tag","from_kind":"work_item","from":"The start command",
@@ -1900,7 +1906,7 @@ JSON
 pack_blocked() { cat > "$STUB_PACK" <<JSON
 {"pack":{"item":{"id":"$TODO","kind":"story","title":"Nobody has groomed this",
   "ask":"","body":"","status":"todo","status_note":"",
-  "brief_rev":0,"ready_blockers":["no_verifiable_criterion","no_environment"]},
+  "brief_rev":0,"ready_blockers":["no_verifiable_criterion","no_environment"],"assignee_id":"me-1","assignee_name":"Me"},
  "criteria":[],"neighbourhood":{"nodes":[],"edges":[]},"decisions":[],
  "environments":[],"pack_bytes":300,"truncated":false,"trimmed":[]}}
 JSON
@@ -1908,7 +1914,7 @@ JSON
 pack_in_status() { cat > "$STUB_PACK" <<JSON
 {"pack":{"item":{"id":"$TODO","kind":"story","title":"Somebody has this",
   "ask":"","body":"","status":"$1","status_note":"",
-  "brief_rev":1,"ready_blockers":[]},
+  "brief_rev":1,"ready_blockers":[],"assignee_id":"me-1","assignee_name":"Me"},
  "criteria":[],"neighbourhood":{"nodes":[],"edges":[]},"decisions":[],
  "environments":[],"pack_bytes":300,"truncated":false,"trimmed":[]}}
 JSON
@@ -2071,6 +2077,65 @@ git -C "$SRT" worktree remove --force "$(wt_of "story/nobody-has-groomed-this-${
 git -C "$SRT" branch -D "story/nobody-has-groomed-this-${TODO%%-*}" >/dev/null 2>&1
 pack_ready
 
+# THE FACTORY SETS THE ASSIGNEE (553). A todo item no pack names an assignee on
+# is given to the person the token acts for, over the PATCH revise uses, with
+# `me` in the body; one somebody else has is started and NOT reassigned, and
+# the warning names them; one the caller already has sends nothing; and a
+# refused or timed-out assignment never fails the start.
+pack_assign() { # pack_assign <assignee id|""> <assignee name|""> — the TODO item, no blockers
+  jq -nc --arg id "$TODO" --arg a "$1" --arg n "$2" \
+    '{pack:{item:{id:$id,kind:"story",title:"Nobody has groomed this",ask:"",body:"",
+      status:"todo",status_note:"",brief_rev:1,ready_blockers:[],
+      assignee_id:(if $a == "" then null else $a end),
+      assignee_name:(if $n == "" then null else $n end)},
+     criteria:[],neighbourhood:{nodes:[],edges:[]},decisions:[],environments:[],
+     pack_bytes:300,truncated:false,trimmed:[]}}' > "$STUB_PACK"
+}
+assign_reset() { # takes the worktree back out so the next case starts clean
+  git -C "$SRT" worktree remove --force "$(wt_of "story/nobody-has-groomed-this-${TODO%%-*}")" 2>/dev/null
+  git -C "$SRT" branch -D "story/nobody-has-groomed-this-${TODO%%-*}" >/dev/null 2>&1
+}
+assigns() { awk -F'\t' '$1 == "PATCH" && $3 ~ /assignee_id/' "$STUB_CALLS" | grep -c .; }
+pack_assign "" ""
+run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "553 an unassigned item starts — exits 0"       0 "$RC"
+check "553 reported in_progress"                      1 "$(awk -F'\t' '$1 == "PATCH"' "$STUB_CALLS" | grep -c '"status":"in_progress"')"
+check "553 and assigned, in the same run"             1 "$(assigns)"
+AP=$(awk -F'\t' '$1 == "PATCH" && $3 ~ /assignee_id/' "$STUB_CALLS" | tail -1)
+check "553 over the item's agent route"               1 "$(printf '%s' "$AP" | cut -f2 | grep -c "/agent/projects/p-1/items/$TODO\$")"
+check "553 with the body {assignee_id: me}"           '{"assignee_id":"me"}' "$(printf '%s' "$AP" | cut -f3)"
+check "553 no warning when it worked"                 0 "$(printf '%s\n' "$OUT" | grep -c 'Warning — this item\|Warning — the assignment')"
+assign_reset
+
+pack_assign "someone-else" "Ana Souza"
+run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "553 an item somebody else has starts — exits 0" 0 "$RC"
+check "553 and changes no assignee"                   0 "$(assigns)"
+check "553 and prints who has it, as a warning"       1 "$(printf '%s\n' "$OUT" | grep -c 'Warning — this item is already assigned to Ana Souza')"
+check "553 recorded on the session"                   1 "$(grep 'activities' "$STUB_CALLS" | grep -c 'already assigned to Ana Souza')"
+assign_reset
+
+pack_assign "me-1" "Me"
+run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "553 an item already the caller's starts — exits 0" 0 "$RC"
+check "553 and sends no assignment"                   0 "$(assigns)"
+check "553 and prints no warning"                     0 "$(printf '%s\n' "$OUT" | grep -c 'Warning — this item')"
+assign_reset
+
+pack_assign "" ""
+STUB_ASSIGN_FAIL=500 run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "553 an assignment answered 500 — start exits 0" 0 "$RC"
+check "553 the assignment was tried"                  1 "$(assigns)"
+check "553 the session is still opened"               1 "$(sent POST '/sessions$')"
+check "553 the failure is printed"                    1 "$(printf '%s\n' "$OUT" | grep -c 'Warning — the assignment was refused')"
+check "553 and recorded on the session"               1 "$(grep 'activities' "$STUB_CALLS" | grep -c 'assignment was refused')"
+assign_reset
+STUB_ASSIGN_FAIL=timeout run_start "$TODO" >/dev/null; OUT=$(cat "$STUB/out")
+check "553 an assignment that times out — exits 0"    0 "$RC"
+check "553 and says it timed out"                     1 "$(printf '%s\n' "$OUT" | grep -c 'assignment timed out after 30s')"
+assign_reset
+pack_ready
+
 # STARTING IT AGAIN FINISHES WHAT IS THERE (359). Two agents on one item is
 # caught by the status refusal — a claimed item is `in_progress`, not
 # `todo` or `ready`. An item still startable with its branch and worktree standing is a start
@@ -2184,7 +2249,7 @@ echo " next, and the fallback:"
 # `next` picks the item and builds the same pack, so only the door differs.
 cat > "$STUB_NEXT" <<JSON
 {"pack":{"item":{"id":"$OPEN","kind":"bug","title":"S9.9 · Pick me","ask":"","body":"",
-  "status":"ready","status_note":"","brief_rev":1,"ready_blockers":[]},
+  "status":"ready","status_note":"","brief_rev":1,"ready_blockers":[],"assignee_id":"me-1","assignee_name":"Me"},
  "criteria":[{"text":"it is picked","verify":"test","status":"open"}],
  "neighbourhood":{"nodes":[],"edges":[]},"decisions":[],"environments":[],
  "pack_bytes":300,"truncated":false,"trimmed":[]}}
@@ -2499,7 +2564,7 @@ ship_item
 cat > "$STUB_PACK" <<JSON
 {"pack":{"item":{"id":"$SHIP_ITEM","kind":"story","title":"S2.5 · Ship the branch",
   "ask":"Finish an item in one command","body":"","status":"in_progress","status_note":"",
-  "brief_rev":4,"ready_blockers":[]},
+  "brief_rev":4,"ready_blockers":[],"assignee_id":"me-1","assignee_name":"Me"},
  "criteria":[{"text":"The command refuses a dirty tree","verify":"manual","status":"open"},
              {"text":"The pull request names its item","verify":"browser","status":"open"}],
  "neighbourhood":{"nodes":[],"edges":[]},"decisions":[],
